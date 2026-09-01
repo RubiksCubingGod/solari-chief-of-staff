@@ -1,5 +1,10 @@
 # Majordomo — sprint graph draft (pre-nah input)
 
+> **Superseded 2026-09-01.** The release graph now lives in
+> `.nah/projects/chief-of-staff/project.yaml` (scoped via /nah-scope; s1 split three ways,
+> foundation owns thin CRUD, UserIO port instead of the s5→s3 edge). This file is kept as the
+> historical input.
+
 Draft only. The real contracts get written collaboratively in `/nah-scope` and
 normalized by `/nah-enhance` — this file is the thinking we bring into those
 conversations, shaped to nah's model: a **project** (finite goal, MECE release

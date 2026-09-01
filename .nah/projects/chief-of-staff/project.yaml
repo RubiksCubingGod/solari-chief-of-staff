@@ -7,14 +7,311 @@ goal: A deployed, tested personal chief-of-staff agent - watches, deadline calen
 owners:
   - RubiksCubingGod
 clients: []
-context: []
-research: []
+context:
+  - context/challenge-brief.md
+  - context/architecture-direction.md
+research:
+  - research/solari-sdk-surface.md
+repositories:
+  - id: chief-of-staff
+    remote: RubiksCubingGod/chief-of-staff
 backlog: []
 project_management:
   links: []
-systems: []
-sprints: []
+systems:
+  - id: foundation
+    sprint_ids:
+      - repo-foundation
+      - fixture-harness
+      - browser-substrate
+  - id: engines
+    sprint_ids:
+      - watch-engine
+      - action-playbooks
+      - agentic-mode
+      - slot-sniping
+  - id: surfaces
+    sprint_ids:
+      - telegram-chat
+      - dashboard-read
+      - calendar-wiring
+  - id: delivery
+    sprint_ids:
+      - real-site-hardening
+      - challenge-launch
+sprints:
+  - id: repo-foundation
+    alias: s1
+    owner: RubiksCubingGod
+    wall_hours_estimate: 13
+    estimated_task_count: 8
+    average_task_agent_hours: 2
+    release:
+      outcome: A green-CI pnpm workspace where every later release has a place to land - package
+        layout per ARCHITECTURE section 11, Drizzle schema and migrations for all tables, pg-boss
+        job harness, docker-compose Postgres, Fastify API skeleton with engine-free CRUD routes
+        (watches, calendar items, task reads), and CI with lint, unit, integration, and coverage
+        gates.
+      kind: tooling
+      change_sets:
+        - repository: chief-of-staff
+          depends_on: []
+  - id: fixture-harness
+    alias: s1b
+    owner: RubiksCubingGod
+    wall_hours_estimate: 13
+    estimated_task_count: 5
+    average_task_agent_hours: 2
+    release:
+      outcome: Controllable fixture sites (fakestore, fakegym, fakedmv, fakenews) with hostile
+        modes (blocked captcha shell, redesign) and queryable test endpoints, bootable by the
+        integration harness, so every later release proves behavior against exact fixture state.
+      kind: tooling
+      change_sets:
+        - repository: chief-of-staff
+          depends_on: []
+  - id: browser-substrate
+    alias: s1c
+    owner: RubiksCubingGod
+    wall_hours_estimate: 8
+    estimated_task_count: 4
+    average_task_agent_hours: 2
+    release:
+      outcome: A BrowserProvider seam with LocalProvider (plain Playwright) and SolariProvider
+        (profiles, recording, stealth) implementations plus withBrowser() close/kill hygiene - CI
+        proves engines run on LocalProvider, and a tagged live smoke opens a page through a real
+        Solari browser and exits cleanly.
+      kind: tooling
+      change_sets:
+        - repository: chief-of-staff
+          depends_on: []
+  - id: watch-engine
+    alias: s2
+    owner: RubiksCubingGod
+    wall_hours_estimate: 21
+    estimated_task_count: 9
+    average_task_agent_hours: 2
+    release:
+      outcome: Price and change watches run on schedule against fixtures with tiered fetching
+        (HTTP, browser, stealth), deterministic extractors created once by LLM, self-healing on
+        selector breakage, observation history, and trigger-to-notifier events.
+      kind: feature
+      change_sets:
+        - repository: chief-of-staff
+          depends_on: []
+  - id: telegram-chat
+    alias: s3
+    owner: RubiksCubingGod
+    wall_hours_estimate: 13
+    estimated_task_count: 7
+    average_task_agent_hours: 2
+    release:
+      outcome: A bound Telegram bot where natural language becomes structured CRUD API calls
+        through one Claude tool loop, with one-time-code account binding, pending-question
+        routing, transcript persistence, and rate limiting.
+      kind: feature
+      change_sets:
+        - repository: chief-of-staff
+          depends_on: []
+  - id: dashboard-read
+    alias: s4
+    owner: RubiksCubingGod
+    wall_hours_estimate: 13
+    estimated_task_count: 6
+    average_task_agent_hours: 2
+    release:
+      outcome: An authenticated magic-link Next.js dashboard rendering watches with observation
+        sparklines, the calendar list, and a task history shell from the read API against a
+        seeded database.
+      kind: feature
+      change_sets:
+        - repository: chief-of-staff
+          depends_on: []
+  - id: action-playbooks
+    alias: s5
+    owner: RubiksCubingGod
+    wall_hours_estimate: 21
+    estimated_task_count: 8
+    average_task_agent_hours: 3
+    release:
+      outcome: The action engine in playbook mode - persisted task state machine with a
+        waiting_user gate behind a UserIO port (scripted IO in proofs), fakegym cancellation
+        playbook end-to-end, session recording stored on the task, code-enforced guardrails
+        (domain allowlist, payment gate), and the dashboard task detail with replay embed.
+      kind: feature
+      change_sets:
+        - repository: chief-of-staff
+          depends_on: []
+  - id: agentic-mode
+    alias: s6
+    owner: RubiksCubingGod
+    wall_hours_estimate: 21
+    estimated_task_count: 7
+    average_task_agent_hours: 3
+    release:
+      outcome: LLM-driven browser missions for sites without a playbook - tool loop with budgets,
+        code-enforced guardrails, per-task cost logging, and a regression-gated eval harness
+        against fixture scenarios including hostile variants.
+      kind: feature
+      change_sets:
+        - repository: chief-of-staff
+          depends_on: []
+  - id: calendar-wiring
+    alias: s7
+    owner: RubiksCubingGod
+    wall_hours_estimate: 8
+    estimated_task_count: 5
+    average_task_agent_hours: 2
+    release:
+      outcome: Calendar subscriptions and deadlines created via chat or dashboard, daily cron
+        reminders, auto-cancel before renewal enqueuing a confirm-gated cancellation task, and
+        the real Telegram waiting_user round-trip proven end to end.
+      kind: feature
+      change_sets:
+        - repository: chief-of-staff
+          depends_on: []
+  - id: slot-sniping
+    alias: s8
+    owner: RubiksCubingGod
+    wall_hours_estimate: 8
+    estimated_task_count: 4
+    average_task_agent_hours: 2
+    release:
+      outcome: Slot watches that on trigger immediately enqueue and run a book-this-slot task
+        against fakedmv, with race-safe re-arm when the slot is gone by booking time.
+      kind: feature
+      change_sets:
+        - repository: chief-of-staff
+          depends_on: []
+  - id: real-site-hardening
+    alias: s9
+    owner: RubiksCubingGod
+    wall_hours_estimate: 21
+    estimated_task_count: 6
+    average_task_agent_hours: 3
+    release:
+      outcome: The system proven against 2-3 chosen real sites with real watches and playbooks,
+        nightly live smoke green three consecutive runs, per-task cost under target, and the
+        manual release checklist recorded as attestations.
+      kind: reliability
+      change_sets:
+        - repository: chief-of-staff
+          depends_on: []
+  - id: challenge-launch
+    alias: s10
+    owner: RubiksCubingGod
+    wall_hours_estimate: 13
+    estimated_task_count: 6
+    average_task_agent_hours: 2
+    release:
+      outcome: Deployed to production with a public repo, verified fresh-clone setup, README and
+        architecture writeup, demo recording, and the Solari challenge launch post published
+        tagging the challenge hosts.
+      kind: operations
+      change_sets:
+        - repository: chief-of-staff
+          depends_on: []
 dependency_graph:
-  edges: []
+  edges:
+    - prerequisite: repo-foundation
+      dependent: fixture-harness
+      artifact: pnpm workspace with CI harness and coverage gates
+      reason: Fixture packages land in the established workspace and are booted by the CI
+        integration harness.
+    - prerequisite: repo-foundation
+      dependent: browser-substrate
+      artifact: workspace, CI, and secrets-gated workflow conventions
+      reason: Provider packages and the live smoke workflow require the workspace and CI
+        foundation.
+    - prerequisite: repo-foundation
+      dependent: telegram-chat
+      artifact: Fastify CRUD API and messages schema
+      reason: Chat tools are thin wrappers over the CRUD routes, and transcripts persist to the
+        established schema.
+    - prerequisite: repo-foundation
+      dependent: dashboard-read
+      artifact: read API endpoints and seedable schema
+      reason: Dashboard pages render read-API data against a seeded database.
+    - prerequisite: fixture-harness
+      dependent: watch-engine
+      artifact: fakestore and fakenews with hostile modes and test endpoints
+      reason: Watch proofs mutate prices and content and assert tier escalation via fixture test
+        endpoints.
+    - prerequisite: browser-substrate
+      dependent: watch-engine
+      artifact: BrowserProvider seam with Local and Solari implementations
+      reason: Tier-1/2 fetching and block detection run through the provider seam.
+    - prerequisite: fixture-harness
+      dependent: action-playbooks
+      artifact: fakegym with queryable cancellation state
+      reason: Cancellation proofs assert the fixture's member record flipped to cancelled.
+    - prerequisite: browser-substrate
+      dependent: action-playbooks
+      artifact: provider seam with session recording and withBrowser hygiene
+      reason: Tasks run recorded browser missions through the provider.
+    - prerequisite: dashboard-read
+      dependent: action-playbooks
+      artifact: dashboard shell and task history page
+      reason: The task detail with replay embed extends the read dashboard's task shell.
+    - prerequisite: action-playbooks
+      dependent: agentic-mode
+      artifact: task state machine, guardrail layer, and waiting_user gate
+      reason: The agentic loop executes inside the same task engine and guardrails.
+    - prerequisite: watch-engine
+      dependent: calendar-wiring
+      artifact: scheduler and notifier event path
+      reason: Daily scans and reminders reuse the scheduling and notification machinery.
+    - prerequisite: action-playbooks
+      dependent: calendar-wiring
+      artifact: confirm-gated task enqueue
+      reason: Auto-cancel before renewal enqueues confirm-gated cancellation tasks.
+    - prerequisite: telegram-chat
+      dependent: calendar-wiring
+      artifact: bound bot with answer_pending routing
+      reason: Chat-created items and the real Telegram waiting_user round-trip compose and are
+        proven here.
+    - prerequisite: watch-engine
+      dependent: slot-sniping
+      artifact: watch trigger pipeline
+      reason: Slot watches extend the watch kinds and trigger flow.
+    - prerequisite: action-playbooks
+      dependent: slot-sniping
+      artifact: task engine and playbook registry
+      reason: Booking runs as a playbook task enqueued from a watch trigger.
+    - prerequisite: watch-engine
+      dependent: real-site-hardening
+      artifact: watch engine proven against fixtures
+      reason: Real-site watches exercise the fixture-proven engine.
+    - prerequisite: action-playbooks
+      dependent: real-site-hardening
+      artifact: playbook task engine with recordings
+      reason: Real-site playbooks run on the fixture-proven engine.
+    - prerequisite: agentic-mode
+      dependent: real-site-hardening
+      artifact: agentic loop with eval baseline
+      reason: Unknown real sites fall back to the evaluated agentic mode.
+    - prerequisite: calendar-wiring
+      dependent: real-site-hardening
+      artifact: reminder and auto-cancel flows
+      reason: The release checklist exercises calendar-driven flows end to end.
+    - prerequisite: slot-sniping
+      dependent: real-site-hardening
+      artifact: watch-to-task pipeline
+      reason: The demo scenario set includes slot sniping.
+    - prerequisite: real-site-hardening
+      dependent: challenge-launch
+      artifact: demo-ready system with green nightly live suite and attestations
+      reason: Launch publishes only the hardened, checklist-passed system.
   unresolved: []
-open_decisions: []
+open_decisions:
+  - Real demo sites for real-site-hardening (2-3 ToS-friendly, reliably demoable) - human pick,
+    needed before action-playbooks closes.
+  - Working name and public repo name (currently chief-of-staff, Majordomo placeholder) - needed
+    before launch; a rename updates the repository registry.
+  - Hosting (Railway default vs Fly.io) - decide by dashboard-read.
+  - Anthropic monthly spend cap for nightly agent evals - set in console before agentic-mode
+    starts.
+  - Site-login handoff path - no documented API mints a watchable live-view URL (research
+    solari-sdk-surface); either ask the vendor about live-view URL minting or design the
+    connect-site flow around the Solari console profile editor. Needed before action-playbooks
+    design closes.
