@@ -18,6 +18,7 @@
     "start": "node scripts/server.mjs",
     "worker": "node scripts/worker.mjs",
     "fixtures:dev": "node scripts/fixtures.mjs",
+    "browsers": "node scripts/browsers.mjs",
     "clean": "tsc --build --clean",
     "check": "node scripts/check.mjs"
   },

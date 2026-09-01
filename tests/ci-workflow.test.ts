@@ -53,6 +53,15 @@ describe('.github/workflows/check.yml', () => {
     expect(manifest.scripts['check']).toBe('node scripts/check.mjs');
   });
 
+  it('installs the browser the provider contract suite drives, before the gate', () => {
+    // `pnpm install` does not fetch it, so without this step the contract suite
+    // fails on every push with a missing executable rather than a real defect.
+    const browsers = runs.findIndex((run) => run.startsWith('pnpm browsers'));
+    expect(browsers).toBeGreaterThanOrEqual(0);
+    expect(runs.indexOf('pnpm check')).toBeGreaterThan(browsers);
+    expect(manifest.scripts['browsers']).toBe('node scripts/browsers.mjs');
+  });
+
   it('installs from the lockfile so CI cannot silently resolve newer versions', () => {
     expect(runs).toContain('pnpm install --frozen-lockfile');
   });
