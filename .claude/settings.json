@@ -1,0 +1,27 @@
+{
+  "autoCompactWindow": 250000,
+  "hooks": {
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "nah lifecycle bridge claude-code",
+            "timeout": 10000
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "nah lifecycle bridge claude-code",
+            "timeout": 10000
+          }
+        ]
+      }
+    ]
+  }
+}

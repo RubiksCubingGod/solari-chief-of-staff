@@ -1,0 +1,3 @@
+.nah/config.local.yaml
+.nah/credentials.env
+.nah/.traces/
