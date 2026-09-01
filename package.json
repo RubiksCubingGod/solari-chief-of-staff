@@ -14,6 +14,7 @@
     "test:unit": "node scripts/vitest.mjs run --project unit",
     "test:integration": "node scripts/vitest.mjs run --project integration",
     "build": "tsc --build",
+    "migrate": "node scripts/migrate.mjs",
     "clean": "tsc --build --clean",
     "check": "node scripts/check.mjs"
   },
