@@ -8,6 +8,14 @@ export {
   startFakedmvFixture,
 } from './fakedmv.js';
 export {
+  type CancellationRefusal,
+  type FakegymControl,
+  type Member,
+  type MemberInput,
+  type MemberStatus,
+  startFakegymFixture,
+} from './fakegym.js';
+export {
   type Article,
   type ArticleInput,
   type FakenewsControl,
