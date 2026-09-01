@@ -25,6 +25,8 @@ export {
 } from './outbound.js';
 export { createRateLimiter, type RateLimiter, type RateLimitVerdict } from './rate-limit.js';
 export {
+  ANSWER_RECORDED,
+  ASSISTANT_UNAVAILABLE,
   BINDING_ALREADY_DONE,
   BINDING_CHAT_TAKEN,
   BINDING_CODE_CONSUMED,
@@ -35,6 +37,18 @@ export {
   HOW_TO_BIND,
   RATE_LIMIT_NOTICE,
 } from './replies.js';
+export {
+  createTaskEventAnswerSink,
+  findPendingQuestion,
+  routeMessage,
+  type AnswerSink,
+  type ChatLoop,
+  type ChatLoopRequest,
+  type PendingQuestion,
+  type QuestionAnswer,
+  type RouteMessageOptions,
+  type RoutedMessage,
+} from './routing.js';
 export {
   createBotRuntime,
   type BotRuntime,

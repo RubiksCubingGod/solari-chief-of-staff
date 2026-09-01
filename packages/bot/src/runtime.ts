@@ -32,6 +32,13 @@ import {
   HOW_TO_BIND,
   RATE_LIMIT_NOTICE,
 } from './replies.js';
+import {
+  createTaskEventAnswerSink,
+  routeMessage,
+  type AnswerSink,
+  type ChatLoop,
+  type RouteMessageOptions,
+} from './routing.js';
 import { recordMessage, resolveUserId, type BotDatabase } from './transcript.js';
 
 export interface BotRuntime {
@@ -58,6 +65,18 @@ export interface BotRuntime {
 export interface BotRuntimeOptions {
   readonly config: BotConfig;
   readonly db: BotDatabase;
+  /**
+   * Where an ordinary message goes. Required rather than defaulted: a runtime
+   * with nowhere to send a request would take every message a bound user sends
+   * and answer none of them, and it would do it silently.
+   */
+  readonly chatLoop: ChatLoop;
+  /**
+   * Where an answer to a pending question goes. Defaults to writing the reply
+   * onto the task's own timeline, which is what production wants; tests pass
+   * their own to watch what arrives.
+   */
+  readonly answerSink?: AnswerSink;
   /** Injected so the rate limiter's refill is provable without waiting for it. */
   readonly now?: () => number;
   /**
@@ -110,6 +129,14 @@ export function createBotRuntime(options: BotRuntimeOptions): BotRuntime {
   bot.use(refuseFloods(limiter));
   bot.use(redeemStart(db));
   bot.use(requireBinding(db, createNoticeGate(config.rateLimit.noticeWindowMs, now)));
+  // Last, and it calls no `next()`: past here the message has a destination,
+  // and anything installed after this would be a second one.
+  bot.use(
+    route(db, {
+      chatLoop: options.chatLoop,
+      answerSink: options.answerSink ?? createTaskEventAnswerSink(db),
+    }),
+  );
 
   return {
     transport: config.transport,
@@ -250,6 +277,22 @@ function requireBinding(db: BotDatabase, gate: NoticeGate): MiddlewareFn<Context
     // only the explanation is rationed, or a script talking to an unbound chat
     // would get one reply per message forever.
     if (gate.due(String(chatId))) await ctx.reply(HOW_TO_BIND);
+  };
+}
+
+/**
+ * The last middleware: hands the message to the router and says whatever comes
+ * back. The router itself is transport-free, so this is the one place a routed
+ * reply becomes a Telegram call.
+ */
+function route(db: BotDatabase, options: RouteMessageOptions): MiddlewareFn<Context> {
+  return async (ctx) => {
+    const chatId = ctx.chat?.id;
+    const text = ctx.message?.text;
+    // Not a text message from a chat: nothing this sprint knows how to route,
+    // and already on the record from the way in.
+    if (chatId === undefined || text === undefined) return;
+    await ctx.reply(await routeMessage(db, options, { chatId: String(chatId), text }));
   };
 }
 

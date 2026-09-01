@@ -5,6 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { loadBotConfig, type BotConfig } from './config.js';
 import { HOW_TO_BIND, RATE_LIMIT_NOTICE } from './replies.js';
+import type { ChatLoop } from './routing.js';
 import { createBotRuntime, type BotRuntime } from './runtime.js';
 import { TEST_BOT_INFO, createTestTransport, textUpdate, type TestTransport } from './testing/transport.js';
 
@@ -15,6 +16,15 @@ import { TEST_BOT_INFO, createTestTransport, textUpdate, type TestTransport } fr
  * direction lands in the transcript including the refused ones, and a flood is
  * refused with exactly one notice per window.
  */
+
+/**
+ * What the chat loop says here. This file is about the machinery a message
+ * crosses before it reaches a destination, so the destination is a constant:
+ * every reply below that is this string is the runtime having got the message
+ * all the way through.
+ */
+const LOOP_REPLY = 'noted';
+const chatLoop: ChatLoop = { respond: () => Promise.resolve(LOOP_REPLY) };
 
 const BOUND_CHAT = '90001';
 const UNBOUND_CHAT = '90002';
@@ -53,6 +63,7 @@ function runtimeFor(
     db: database.db,
     transformer: transport.transformer,
     botInfo: TEST_BOT_INFO,
+    chatLoop,
     now,
   });
   started.push(runtime);
@@ -147,8 +158,12 @@ describe('transcript persistence', () => {
 
     await runtime.bot.handleUpdate(textUpdate(BOUND_CHAT, 'watch this page for me'));
 
+    // Both halves: the message in, and the answer the router got for it. A
+    // bound chat with tokens left is answered, which is what makes the pair a
+    // readable exchange rather than a log of arrivals.
     expect(await transcript()).toEqual([
       { direction: 'inbound', chatId: BOUND_CHAT, text: 'watch this page for me', userId: boundUserId },
+      { direction: 'outbound', chatId: BOUND_CHAT, text: LOOP_REPLY, userId: boundUserId },
     ]);
   });
 
@@ -189,11 +204,18 @@ describe('rate limiting', () => {
       await runtime.bot.handleUpdate(textUpdate(BOUND_CHAT, text));
     }
 
-    // Two allowed by the burst, three refused, and exactly one notice for them.
-    expect(transport.sent()).toEqual([{ chatId: BOUND_CHAT, text: RATE_LIMIT_NOTICE }]);
+    // Two allowed by the burst and answered, three refused, and exactly one
+    // notice for the three — not one each.
+    expect(transport.sent()).toEqual([
+      { chatId: BOUND_CHAT, text: LOOP_REPLY },
+      { chatId: BOUND_CHAT, text: LOOP_REPLY },
+      { chatId: BOUND_CHAT, text: RATE_LIMIT_NOTICE },
+    ]);
     expect(await transcript()).toEqual([
       { direction: 'inbound', chatId: BOUND_CHAT, text: 'one', userId: boundUserId },
+      { direction: 'outbound', chatId: BOUND_CHAT, text: LOOP_REPLY, userId: boundUserId },
       { direction: 'inbound', chatId: BOUND_CHAT, text: 'two', userId: boundUserId },
+      { direction: 'outbound', chatId: BOUND_CHAT, text: LOOP_REPLY, userId: boundUserId },
       { direction: 'inbound', chatId: BOUND_CHAT, text: 'three', userId: boundUserId },
       { direction: 'outbound', chatId: BOUND_CHAT, text: RATE_LIMIT_NOTICE, userId: boundUserId },
       // Refused and silent, but still on the record.
@@ -212,9 +234,10 @@ describe('rate limiting', () => {
     transport.clear();
     await runtime.bot.handleUpdate(textUpdate(SECOND_BOUND_CHAT, 'am I still allowed?'));
 
-    // Not refused, and not answered either: a bound chat with tokens left falls
-    // through to whatever handles it, which in this sprint is nothing yet.
-    expect(transport.sent()).toEqual([]);
+    // Answered, not refused: the other chat spent its own burst, and this one
+    // still has its tokens. A limiter that metered globally would have gone
+    // quiet here instead.
+    expect(transport.sent()).toEqual([{ chatId: SECOND_BOUND_CHAT, text: LOOP_REPLY }]);
     expect(await transcript()).toContainEqual({
       direction: 'inbound',
       chatId: SECOND_BOUND_CHAT,

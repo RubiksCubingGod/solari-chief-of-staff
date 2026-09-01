@@ -18,6 +18,7 @@ import {
   type ChatSender,
   type SendRetryPolicy,
 } from './outbound.js';
+import type { ChatLoop } from './routing.js';
 import { createBotRuntime, type BotRuntime } from './runtime.js';
 import {
   TEST_BOT_INFO,
@@ -62,6 +63,10 @@ async function outboundTextsOf(chatId: string): Promise<string[]> {
   return rows.filter((row) => row.direction === 'outbound').map((row) => row.text);
 }
 
+const unreachableLoop: ChatLoop = {
+  respond: () => Promise.reject(new Error('no inbound message in this file reaches the chat loop')),
+};
+
 function configFor(): BotConfig {
   return loadBotConfig({
     TELEGRAM_BOT_TOKEN: '123456:test-token',
@@ -75,6 +80,10 @@ function runtimeFor(transport: TestTransport, waits: number[] = []): BotRuntime 
     db: database.db,
     transformer: transport.transformer,
     botInfo: TEST_BOT_INFO,
+    // Nothing here sends the bot a message: this file is about the outbound
+    // door. The loop is present because the runtime requires one, and it is
+    // never called.
+    chatLoop: unreachableLoop,
     sendRetry: RETRY,
     wait: async (ms) => {
       waits.push(ms);

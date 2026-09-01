@@ -22,6 +22,7 @@ import {
   BINDING_USER_TAKEN,
   HOW_TO_BIND,
 } from './replies.js';
+import type { ChatLoop } from './routing.js';
 import { createBotRuntime, type BotRuntime } from './runtime.js';
 import {
   TEST_BOT_INFO,
@@ -38,6 +39,13 @@ import type { BotDatabase } from './transcript.js';
  * for what it said — a refusal that still bound the chat would read as a
  * refusal and behave as a takeover.
  */
+
+/**
+ * Every message in this file is a `/start`, which the runtime answers before
+ * the router ever sees it - except the one that deliberately checks what the
+ * message *after* binding is attributed to. This is what answers that one.
+ */
+const chatLoop: ChatLoop = { respond: () => Promise.resolve('noted') };
 
 const CHAT = '70001';
 const OTHER_CHAT = '70002';
@@ -99,6 +107,7 @@ function runtimeFor(transport: TestTransport, now: () => number = Date.now): Bot
     db: database.db,
     transformer: transport.transformer,
     botInfo: TEST_BOT_INFO,
+    chatLoop,
     now,
   });
   started.push(runtime);

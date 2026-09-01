@@ -39,3 +39,19 @@ export const HOW_TO_BIND =
  */
 export const RATE_LIMIT_NOTICE =
   'You are sending messages faster than I can handle them. I have paused this chat for a moment — everything you send meanwhile is ignored, so please resend anything that mattered.';
+
+/**
+ * What somebody who has just answered a question is told. It says where the
+ * answer went rather than what will happen next, because what happens next is
+ * the job's to decide and this bot does not know it yet.
+ */
+export const ANSWER_RECORDED =
+  'Thanks - I have passed that back to the job that asked, and it will carry on from there.';
+
+/**
+ * The reply when the thing that should have answered could not. Deliberately
+ * says nothing changed: after a failure somewhere in the middle, the question
+ * a person actually has is whether their request half-happened.
+ */
+export const ASSISTANT_UNAVAILABLE =
+  'Something went wrong on my side before I could deal with that, so nothing has changed. Please send it again in a moment.';
