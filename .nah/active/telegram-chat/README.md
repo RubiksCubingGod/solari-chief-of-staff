@@ -61,3 +61,33 @@ transport against a stub question record.
 
 [bot-runtime] → [account-binding, claude-tool-loop, outbound-send] → [pending-question-routing]
 → [chat-integration-proof]
+
+## Optional manual live-bot sanity check
+
+Never a gate, and deliberately not scripted. CI proves the whole front door
+against grammY's test transport in `tests/chat-front-door.integration.test.ts`,
+and the real Telegram round-trip belongs to `calendar-wiring` (s7). This sprint
+ships the runtime a process will start, not the process: nothing in `scripts/`
+runs the bot yet, which is why the steps below are done by hand.
+
+What it buys, and the only thing it buys, is the one fact no test transport can
+report: that a real token, a real long poll and a real phone agree with each
+other. Needs `TELEGRAM_BOT_TOKEN` (minted with @BotFather) and
+`ANTHROPIC_API_KEY` in `.env`; both stay blank in `.env.example`.
+
+1. `docker compose up -d`, `pnpm migrate`, then `pnpm start` in its own
+   terminal. The chat tools reach the API over HTTP like any other client, so
+   the API has to be up for anything past `/start` to work.
+2. Start a runtime by hand against that API — `createBotRuntime` from
+   `@chief-of-staff/bot` with `config: loadBotConfig()`, the process database,
+   and a `chatLoop` built the way `chatLoopOver` builds one in the composed
+   suite: `createChatAgent` over a real `Anthropic` client and
+   `createHttpCrudClient({ baseUrl })`. Then `await runtime.start()`. Nothing is
+   committed for this; the wiring is five lines and s7 lands the real one.
+3. Insert a `binding_codes` row for your user, send `/start <code>` from
+   Telegram, and expect the confirmation reply.
+4. Ask for something in your own words — "watch <url> and tell me if it drops
+   below £20". Expect a reply that names what it did, a matching `watches` row,
+   and two `messages` rows for the exchange.
+5. Whatever happens is a finding, not evidence. A pass records nothing; a
+   failure becomes a task.
