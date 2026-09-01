@@ -4,6 +4,8 @@
 node_modules/
 dist/
 coverage/
+# The nested run that proves the coverage gate keeps its own report dir.
+tests/fixtures/coverage-gate/.coverage/
 *.tsbuildinfo
 .env
 .env.local
