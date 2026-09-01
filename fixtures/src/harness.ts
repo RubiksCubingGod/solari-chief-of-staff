@@ -36,6 +36,62 @@ export type ControlRequest = <TResult>(
 ) => Promise<TResult>;
 
 /**
+ * The routes `fixture-harness-contract` requires every fixture to expose with
+ * the same shape. Mounted from one place so a fixture cannot quietly ship
+ * without them, and so "the same shape" is a property of the harness rather
+ * than of four hand-written routers that agree today.
+ */
+export interface InstanceRoutes<TState> {
+  /** Everything the instance knows. */
+  state(): TState;
+  /**
+   * Sets the whole starting state in one call. Returns a message to refuse,
+   * having applied nothing: a seed that fails halfway would leave a test
+   * asserting against a state no seed ever described.
+   */
+  seed(body: unknown): string | undefined;
+  /** Returns the instance to the baseline its last seed established. */
+  reset(): void;
+}
+
+export function mountInstanceRoutes<TState>(app: Express, routes: InstanceRoutes<TState>): void {
+  app.get('/__test/state', (_request, response) => {
+    response.json(routes.state());
+  });
+
+  app.post('/__test/seed', (request, response) => {
+    const refusal = routes.seed(request.body);
+    if (refusal !== undefined) {
+      response.status(400).json({ error: refusal });
+      return;
+    }
+    response.json(routes.state());
+  });
+
+  app.post('/__test/reset', (_request, response) => {
+    routes.reset();
+    response.json(routes.state());
+  });
+}
+
+/** The client half of {@link mountInstanceRoutes}. */
+export interface InstanceControl<TState, TSeed> {
+  state(): Promise<TState>;
+  seed(input: TSeed): Promise<TState>;
+  reset(): Promise<TState>;
+}
+
+export function buildInstanceControl<TState, TSeed>(
+  request: ControlRequest,
+): InstanceControl<TState, TSeed> {
+  return {
+    state: () => request<TState>('GET', '/__test/state'),
+    seed: (input) => request<TState>('POST', '/__test/seed', input),
+    reset: () => request<TState>('POST', '/__test/reset', {}),
+  };
+}
+
+/**
  * A running fixture owned by exactly one test file.
  */
 export interface FixtureHandle<TControl> {

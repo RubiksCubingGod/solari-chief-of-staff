@@ -1,8 +1,11 @@
 import express, { type Express } from 'express';
 
 import {
+  buildInstanceControl,
   type ControlRequest,
   type FixtureHandle,
+  type InstanceControl,
+  mountInstanceRoutes,
   readRecord,
   startFixture,
   type StartFixtureOptions,
@@ -35,7 +38,19 @@ export interface Booking {
   readonly bookedAt: string;
 }
 
-export interface FakedmvControl {
+/** Everything a fakedmv instance knows, as `GET /__test/state` reports it. */
+export interface FakedmvState {
+  readonly slots: readonly Slot[];
+  readonly bookings: readonly Booking[];
+  readonly failureMode: FailureMode;
+}
+
+export interface FakedmvSeed {
+  readonly slots?: readonly SlotInput[];
+  readonly failureMode?: FailureMode;
+}
+
+export interface FakedmvControl extends InstanceControl<FakedmvState, FakedmvSeed> {
   publishSlot(input: SlotInput): Promise<Slot>;
   withdrawSlot(id: string): Promise<void>;
   slots(): Promise<Slot[]>;
@@ -106,9 +121,70 @@ export function startFakedmvFixture(
   const slots = new Map<string, MutableSlot>();
   const bookings: Booking[] = [];
   let failureMode: FailureMode = 'none';
+  // Slots are mutated in place when they are claimed, so the baseline holds
+  // copies: otherwise winning a slot would rewrite the baseline that `reset`
+  // exists to restore.
+  let baselineSlots: MutableSlot[] = [];
+  let baselineFailureMode: FailureMode = failureMode;
+
+  const isFailureMode = (value: unknown): value is FailureMode =>
+    value === 'none' || value === 'transient';
 
   const mount = (app: Express): void => {
     app.use(express.urlencoded({ extended: false }));
+
+    mountInstanceRoutes<FakedmvState>(app, {
+      state: () => ({
+        slots: [...slots.values()],
+        bookings: [...bookings],
+        failureMode,
+      }),
+      seed: (body) => {
+        const record = readRecord(body);
+        const { slots: raw, failureMode: nextFailureMode } = record;
+        if (nextFailureMode !== undefined && !isFailureMode(nextFailureMode)) {
+          return 'failureMode must be none or transient';
+        }
+        let parsed: MutableSlot[] | undefined;
+        if (raw !== undefined) {
+          if (!Array.isArray(raw)) {
+            return 'slots must be an array';
+          }
+          parsed = [];
+          for (const entry of raw) {
+            const slot = parseSlot(entry);
+            if (typeof slot === 'string') {
+              return slot;
+            }
+            parsed.push({ ...slot, status: 'open' });
+          }
+        }
+        if (parsed !== undefined) {
+          slots.clear();
+          for (const slot of parsed) {
+            slots.set(slot.id, slot);
+          }
+        }
+        if (isFailureMode(nextFailureMode)) {
+          failureMode = nextFailureMode;
+        }
+        // A fresh starting state has no history: a booking left over from
+        // before the seed would make `bookings` describe a calendar that no
+        // longer exists.
+        bookings.length = 0;
+        baselineSlots = [...slots.values()].map((slot) => ({ ...slot }));
+        baselineFailureMode = failureMode;
+        return undefined;
+      },
+      reset: () => {
+        slots.clear();
+        for (const slot of baselineSlots) {
+          slots.set(slot.id, { ...slot });
+        }
+        bookings.length = 0;
+        failureMode = baselineFailureMode;
+      },
+    });
 
     app.get('/appointments', (_request, response) => {
       response.type('text/html').send(renderCalendar([...slots.values()]));
@@ -183,6 +259,7 @@ export function startFakedmvFixture(
   };
 
   const buildControl = (request: ControlRequest): FakedmvControl => ({
+    ...buildInstanceControl<FakedmvState, FakedmvSeed>(request),
     publishSlot: (input) => request<Slot>('POST', '/__test/slots', input),
     withdrawSlot: async (id) => {
       await request('DELETE', `/__test/slots/${id}`);

@@ -3,8 +3,11 @@ import { randomInt, randomUUID } from 'node:crypto';
 import express, { type Express, type Request, type Response } from 'express';
 
 import {
+  buildInstanceControl,
   type ControlRequest,
   type FixtureHandle,
+  type InstanceControl,
+  mountInstanceRoutes,
   readRecord,
   startFixture,
   type StartFixtureOptions,
@@ -34,7 +37,22 @@ export interface Member {
   readonly status: MemberStatus;
 }
 
-export interface FakegymControl {
+/**
+ * Everything a fakegym instance knows, as `GET /__test/state` reports it.
+ *
+ * Members are reported in their public shape: the confirmation code stays
+ * behind `GET /__test/member/:id/code` and out of every other response, which
+ * is the whole reason "the engine actually asked the user" is provable here.
+ */
+export interface FakegymState {
+  readonly members: readonly Member[];
+}
+
+export interface FakegymSeed {
+  readonly members?: readonly MemberInput[];
+}
+
+export interface FakegymControl extends InstanceControl<FakegymState, FakegymSeed> {
   seedMember(input: MemberInput): Promise<Member>;
   member(id: string): Promise<Member>;
   confirmationCode(id: string): Promise<string>;
@@ -88,6 +106,21 @@ export function startFakegymFixture(
 ): Promise<FixtureHandle<FakegymControl>> {
   const members = new Map<string, StoredMember>();
   const sessions = new Map<string, Session>();
+  let baseline: StoredMember[] = [];
+
+  const parseMember = (body: unknown): StoredMember | string => {
+    const { id, email, password, name } = readRecord(body);
+    if (
+      typeof id !== 'string' ||
+      typeof email !== 'string' ||
+      typeof password !== 'string' ||
+      typeof name !== 'string' ||
+      [id, email, password, name].some((field) => field.trim() === '')
+    ) {
+      return 'id, email, password and name are required';
+    }
+    return { id, email, password, name, status: 'active', code: generateCode() };
+  };
 
   const readSession = (request: Request): Session | undefined => {
     const header = request.get('cookie') ?? '';
@@ -130,6 +163,46 @@ export function startFakegymFixture(
 
   const mount = (app: Express): void => {
     app.use(express.urlencoded({ extended: false }));
+
+    mountInstanceRoutes<FakegymState>(app, {
+      state: () => ({ members: [...members.values()].map(publicMember) }),
+      seed: (body) => {
+        const raw = readRecord(body).members;
+        if (raw === undefined) {
+          baseline = [...members.values()].map((member) => ({ ...member }));
+          return undefined;
+        }
+        if (!Array.isArray(raw)) {
+          return 'members must be an array';
+        }
+        const parsed: StoredMember[] = [];
+        for (const entry of raw) {
+          const member = parseMember(entry);
+          if (typeof member === 'string') {
+            return member;
+          }
+          parsed.push(member);
+        }
+        members.clear();
+        for (const member of parsed) {
+          members.set(member.id, member);
+        }
+        // A fresh starting state means nobody is signed in; leaving sessions
+        // behind would let a seeded instance answer as a member it no longer has.
+        sessions.clear();
+        baseline = [...members.values()].map((member) => ({ ...member }));
+        return undefined;
+      },
+      reset: () => {
+        members.clear();
+        // Restored with their original codes, so a test may read a code, walk
+        // the flow, reset, and walk it again with the same code.
+        for (const member of baseline) {
+          members.set(member.id, { ...member });
+        }
+        sessions.clear();
+      },
+    });
 
     app.get('/', (_request, response) => {
       response.type('text/html').send(
@@ -305,26 +378,12 @@ export function startFakegymFixture(
     });
 
     app.post('/__test/member', (request, response) => {
-      const { id, email, password, name } = readRecord(request.body);
-      if (
-        typeof id !== 'string' ||
-        typeof email !== 'string' ||
-        typeof password !== 'string' ||
-        typeof name !== 'string' ||
-        [id, email, password, name].some((field) => field.trim() === '')
-      ) {
-        response.status(400).json({ error: 'id, email, password and name are required' });
+      const member = parseMember(request.body);
+      if (typeof member === 'string') {
+        response.status(400).json({ error: member });
         return;
       }
-      const member: StoredMember = {
-        id,
-        email,
-        password,
-        name,
-        status: 'active',
-        code: generateCode(),
-      };
-      members.set(id, member);
+      members.set(member.id, member);
       response.json(publicMember(member));
     });
 
@@ -351,6 +410,7 @@ export function startFakegymFixture(
   };
 
   const buildControl = (request: ControlRequest): FakegymControl => ({
+    ...buildInstanceControl<FakegymState, FakegymSeed>(request),
     seedMember: (input) => request<Member>('POST', '/__test/member', input),
     member: (id) => request<Member>('GET', `/__test/member/${id}`),
     confirmationCode: async (id) =>

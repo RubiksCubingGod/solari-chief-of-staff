@@ -3,6 +3,8 @@ export {
   type BookingRefusal,
   type FailureMode,
   type FakedmvControl,
+  type FakedmvSeed,
+  type FakedmvState,
   type Slot,
   type SlotInput,
   startFakedmvFixture,
@@ -10,6 +12,8 @@ export {
 export {
   type CancellationRefusal,
   type FakegymControl,
+  type FakegymSeed,
+  type FakegymState,
   type Member,
   type MemberInput,
   type MemberStatus,
@@ -19,10 +23,14 @@ export {
   type Article,
   type ArticleInput,
   type FakenewsControl,
+  type FakenewsSeed,
+  type FakenewsState,
   startFakenewsFixture,
 } from './fakenews.js';
 export {
   type FakestoreControl,
+  type FakestoreSeed,
+  type FakestoreState,
   type Product,
   type ProductInput,
   startFakestoreFixture,
@@ -30,10 +38,14 @@ export {
 } from './fakestore.js';
 export {
   assertNoLeakedFixtures,
+  buildInstanceControl,
   type ControlRequest,
   type FixtureHandle,
   FixtureStoppedError,
+  type InstanceControl,
+  type InstanceRoutes,
   liveFixtureCount,
+  mountInstanceRoutes,
   readRecord,
   startFixture,
   type StartFixtureOptions,
@@ -46,6 +58,7 @@ export {
   FIXTURE_MODES,
   type FixtureMode,
   type ModeControl,
+  type ModeSeed,
   type ModeState,
 } from './modes.js';
 export {

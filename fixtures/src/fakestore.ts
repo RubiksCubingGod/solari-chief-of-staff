@@ -1,13 +1,22 @@
 import type { Express } from 'express';
 
 import {
+  buildInstanceControl,
   type ControlRequest,
   type FixtureHandle,
+  type InstanceControl,
+  mountInstanceRoutes,
   readRecord,
   startFixture,
   type StartFixtureOptions,
 } from './harness.js';
-import { buildModeControl, createModeState, type ModeControl } from './modes.js';
+import {
+  buildModeControl,
+  createModeState,
+  type FixtureMode,
+  type ModeControl,
+  type ModeSeed,
+} from './modes.js';
 import { escapeHtml, type Layout, notFoundPage, type PageContent } from './pages.js';
 
 export type StockState = 'in_stock' | 'out_of_stock';
@@ -22,7 +31,20 @@ export interface Product extends ProductInput {
   readonly id: string;
 }
 
-export interface FakestoreControl extends ModeControl {
+/** Everything a fakestore instance knows, as `GET /__test/state` reports it. */
+export interface FakestoreState {
+  readonly mode: FixtureMode;
+  readonly escalationToken: string;
+  readonly products: readonly Product[];
+}
+
+export interface FakestoreSeed extends ModeSeed {
+  readonly products?: readonly Product[];
+}
+
+export interface FakestoreControl
+  extends ModeControl,
+    InstanceControl<FakestoreState, FakestoreSeed> {
   setProduct(id: string, input: ProductInput): Promise<Product>;
   product(id: string): Promise<Product>;
 }
@@ -111,9 +133,72 @@ export function startFakestoreFixture(
 ): Promise<FixtureHandle<FakestoreControl>> {
   const products = new Map<string, Product>();
   const modes = createModeState();
+  let baseline: Product[] = [];
+
+  /**
+   * Validates the `products` field of a whole-instance seed without applying
+   * it, so a bad third entry refuses the call instead of installing the first
+   * two.
+   */
+  const parseSeedProducts = (body: Record<string, unknown>): Product[] | string | undefined => {
+    const raw = body.products;
+    if (raw === undefined) {
+      return undefined;
+    }
+    if (!Array.isArray(raw)) {
+      return 'products must be an array';
+    }
+    const parsed: Product[] = [];
+    for (const entry of raw) {
+      const id = readRecord(entry).id;
+      if (typeof id !== 'string' || id.trim() === '') {
+        return 'each seeded product needs a non-empty id';
+      }
+      const product = parseProduct(id, entry);
+      if (typeof product === 'string') {
+        return product;
+      }
+      parsed.push(product);
+    }
+    return parsed;
+  };
 
   const mount = (app: Express): void => {
     modes.mount(app);
+
+    mountInstanceRoutes<FakestoreState>(app, {
+      state: () => ({
+        mode: modes.current(),
+        escalationToken: modes.token(),
+        products: [...products.values()],
+      }),
+      seed: (body) => {
+        const record = readRecord(body);
+        const parsed = parseSeedProducts(record);
+        if (typeof parsed === 'string') {
+          return parsed;
+        }
+        const refusal = modes.seed(record);
+        if (refusal !== undefined) {
+          return refusal;
+        }
+        if (parsed !== undefined) {
+          products.clear();
+          for (const product of parsed) {
+            products.set(product.id, product);
+          }
+        }
+        baseline = [...products.values()];
+        return undefined;
+      },
+      reset: () => {
+        products.clear();
+        for (const product of baseline) {
+          products.set(product.id, product);
+        }
+        modes.reset();
+      },
+    });
 
     app.get('/product/:id', (request, response) => {
       const product = products.get(request.params.id);
@@ -149,6 +234,7 @@ export function startFakestoreFixture(
 
   const buildControl = (request: ControlRequest): FakestoreControl => ({
     ...buildModeControl(request),
+    ...buildInstanceControl<FakestoreState, FakestoreSeed>(request),
     setProduct: (id, input) => request<Product>('POST', `/__test/product/${id}`, input),
     product: (id) => request<Product>('GET', `/__test/product/${id}`),
   });

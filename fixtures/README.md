@@ -27,6 +27,25 @@ These sites listen on loopback. A Solari cloud browser cannot reach them, so eve
 every sprint runs on LocalProvider (plain Playwright) or over plain HTTP. Nothing here is reachable
 from the `@live` tier, and no fixture proof should expect a Solari session, recording, or replay URL.
 
+## The shared control plane
+
+Every fixture mounts the same three routes, from `mountInstanceRoutes` in `harness.ts` rather than
+from four routers that happen to agree:
+
+| Route | Meaning |
+| --- | --- |
+| `GET /__test/state` | everything the instance knows, as JSON |
+| `POST /__test/seed` | set the whole starting state in one call; refused seeds apply nothing |
+| `POST /__test/reset` | return the instance to the baseline its last seed established |
+
+Isolation still comes from the boot model, not from `reset` — two instances never share state and
+never needed resetting to be independent. `reset` is for a test that wants several rounds against
+one instance without paying for another boot.
+
+`POST /__test/mode` is mounted by the observation targets only. Modes are defined by
+`hostile-mode-surfaces` for pages an engine *observes*; there is no specified meaning for a
+`redesign`ed booking POST, so the flow fixtures do not pretend to have one.
+
 ## Hostile modes
 
 Any observation target (`fakestore`, `fakenews`) can be put into a mode through
@@ -69,7 +88,9 @@ distinguishable from the blocked shell.
 GET /product/:id
 GET /__test/mode
 POST /__test/mode
+GET /__test/state
 POST /__test/seed
+POST /__test/reset
 GET /__test/product/:id
 POST /__test/product/:id
 ```
@@ -82,7 +103,9 @@ An article page carrying a headline and body, with the same mode contract as fak
 GET /article/:id
 GET /__test/mode
 POST /__test/mode
+GET /__test/state
 POST /__test/seed
+POST /__test/reset
 GET /__test/article/:id
 POST /__test/article/:id
 ```
@@ -109,6 +132,9 @@ GET /cancel/step-3
 POST /cancel/step-3
 GET /cancel/confirm
 POST /cancel/confirm
+GET /__test/state
+POST /__test/seed
+POST /__test/reset
 POST /__test/member
 GET /__test/member/:id
 GET /__test/member/:id/code
@@ -124,6 +150,9 @@ re-arm, the other means retry.
 ```routes
 GET /appointments
 POST /book
+GET /__test/state
+POST /__test/seed
+POST /__test/reset
 GET /__test/slots
 POST /__test/slots
 DELETE /__test/slots/:id
