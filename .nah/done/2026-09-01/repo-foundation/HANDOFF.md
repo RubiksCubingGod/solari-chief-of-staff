@@ -164,6 +164,25 @@ CI — with each task's evidence attributable rather than asserted.
     that `HANDOFF.md` is not one of the planning-digest inputs, so writing here
     does not trigger an automatic replan the way editing `DEFERRED.md` does.
 
+24. **Shutdown drains by default; abandoning it is explicit.**
+    `JobHarness.stop()` now takes `StopOptions` and defaults to pg-boss's own
+    `graceful: true`, bounded by `shutdownTimeoutSeconds` (default 30). The
+    fast path stays reachable as `stop({ graceful: false })` for a test tearing
+    a harness down between cases. Defaulting the safe way round means a
+    deployment gets the safe behaviour without knowing the option exists.
+25. **The process entry points are scripts, not a package.**
+    ARCHITECTURE §2 describes one deployable unit running three processes and
+    §11 lists no worker package, so inventing one would have been an
+    architecture change. `scripts/server.mjs` and `scripts/worker.mjs` follow
+    the shape `scripts/migrate.mjs` already set - build the package, import its
+    `dist`, run - and the testable half lives in the packages as `startServer`
+    and `startWorker`, which is what the tests exercise.
+26. **`PORT=0` was left illegal.**
+    Binding an ephemeral port would have been convenient, but `config.ts`
+    rejects 0 and `config.test.ts` asserts that rejection. Relaxing accepted
+    behaviour to make a test easier is the wrong trade; the tests ask the OS
+    for a free port and pass it in through `PORT` instead.
+
 ## Hardening round 1 findings — 2026-09-01
 
 Attempt `attempt-ree9056ea56844fe49d9dc78afe6cd3a7`, profile `claude-only`
@@ -229,6 +248,103 @@ Four uncovered branches remain (`jobs.ts:63,108`, `caller.ts:28`,
 array-valued header, and an absent extractor. Branch coverage is 95.87% against
 a 90 floor. None is a behavior gap and none warrants a task.
 
+## Hardening round 1 repairs — 2026-09-01
+
+All three repair tasks are done and committed, each with a RED receipt taken
+before the fix and a GREEN receipt after.
+
+### H1 · `pool-error-listener` — `5405b52`, evidence reconciled in `33d54af`
+
+`createDatabase` takes an `onError` sink defaulting to a newly exported
+`logPoolError`, and attaches it with `pool.on('error', onError)` — the guard
+`jobs.ts:74` already applied to pg-boss, one file away. The RED was behavioural
+rather than an import error: `logPoolError` and the parameter were added first
+and the listener deliberately withheld, so the receipt records the exact
+process-killing path (`to not throw an error`) instead of a missing symbol.
+
+### H2 · `graceful-worker-shutdown` — `7350f73`
+
+`JobHarness.stop` now defaults to `graceful: true` with an explicit bound.
+Verified against the installed sources rather than recalled behaviour:
+`manager.stop()` parks each worker's cleanup promise in
+`pendingOffWorkCleanups` (`manager.js:511-517,657-670`), the graceful loop in
+`index.js:213` polls `hasPendingCleanups()` until it drains, and
+`worker.stop()` awaits `runPromise` (`worker.js:94-101`), which settles only
+after the current `onFetch` — handler plus completion write — has returned. A
+drain therefore really does wait for the handler.
+
+Three integration tests hold it: a handler still running when `stop()` lands
+returns before `stop()` resolves and its job reaches `completed`;
+`stop({ graceful: false })` still abandons it and the job reaches `failed`; and
+a harness built with `shutdownTimeoutSeconds: 1` gives up before a three-second
+handler finishes, so the bound is proven rather than assumed.
+
+### H3 · `process-entry-points` — `0cc57c4`
+
+`startServer` binds `config.host` and `config.port` and hands back the bound
+URL and a `stop`; `startWorker` builds the harness, applies every registration,
+and hands back the harness and a `stop`. `scripts/server.mjs` and
+`scripts/worker.mjs` are the processes themselves, sharing
+`scripts/shutdown.mjs` for the signal contract: first signal wins, a shutdown
+that throws exits non-zero. `pnpm start` and `pnpm worker` are documented in
+the README, and `tests/docs.test.ts` — which already fails the build when the
+README names a command the repository lacks — was the RED.
+
+`tests/process-entry-points.integration.test.ts` runs both scripts for real: it
+spawns them, fetches `/health` from the address the server prints, and waits for
+the worker to announce itself. `config.host` and `config.port` are no longer
+read by nothing.
+
+## Hardening round 2 — 2026-09-01
+
+Attempt `attempt-r79a5af89c34e4f53a374427fac243353`, profile `claude-only`.
+Round 1 audited the pre-repair surface consumer-backward. This round used fresh
+dimensions: the surfaces the repairs themselves created, specification
+adherence re-checked after the repairs, and receipt integrity.
+
+**Result: no critical, high, or medium implementation gap remains.**
+
+### Specification adherence, re-checked
+
+- `job-scheduling-harness` says the harness is "started by the worker process
+  entry point". Round 1's H3 recorded that no such process existed. It does
+  now: `scripts/worker.mjs` → `startWorker` → `runWorker`, proven by spawning
+  the real process in `tests/process-entry-points.integration.test.ts` rather
+  than by reading the script.
+- That spec's invariant — work survives the process — is stronger after H2, not
+  weaker: a handler that is mid-flight at shutdown now finishes instead of
+  being failed and re-run from the start.
+- `watch-crud-path` and `workspace-ci-gate` are untouched by the repairs, and
+  `AppConfig.host` and `AppConfig.port` are no longer parsed, validated, and
+  read by nothing.
+
+### Low findings — recorded, deliberately not repair tasks
+
+- `packages/db/src/jobs.ts:161` · `runWorker`'s doc comment still calls it "the
+  worker process entry point". `startWorker` is that now; `runWorker` is its
+  composition helper. The H3 repair introduced the drift. There is no behaviour
+  gap and a comment cannot carry a RED, so it is a follow-up rather than a task
+  with fabricated proof.
+- `packages/api/src/server.ts` · if `app.listen` rejects — a port already bound
+  — the pool `createApp` opened is never closed. `scripts/server.mjs` exits
+  non-zero on that path, so no deployed process lingers; only an in-process
+  caller could leak one.
+- `packages/api/src/app.ts:33` · `createDatabase` is called with no sink, so a
+  pool error reaches `console.error` rather than the Fastify logger, bypassing
+  `LOG_LEVEL` and the structured format the rest of the server uses.
+- `scripts/shutdown.mjs` · `process.exit()` runs as soon as `stop()` resolves,
+  which can truncate the last line written to a pipe. The tests assert the exit
+  code, not that line.
+
+### Non-blocking proof findings, carried rather than hidden
+
+- `graceful-shutdown-gate` is red for reasons outside this sprint; see
+  **Open follow-ups** for the exact evidence and the command that refreshes it.
+- The `check` workflow has still never run: no remote, no pull request. See
+  `DEFERRED.md`.
+- Two SIGTERM assertions skip on Windows, where the signal cannot be delivered.
+  CI runs them.
+
 ## Open follow-ups
 
 - `unresolved-design-language` fires on `workspace-toolchain` and
@@ -243,6 +359,27 @@ a 90 floor. None is a behavior gap and none warrants a task.
   disagree with `.nah/active/real-site-hardening/sprint.yaml` and
   `fixture-harness/sprint.yaml`. Both belong to a concurrent planning session
   and are left untouched.
+- The two SIGTERM assertions in
+  `tests/process-entry-points.integration.test.ts` are skipped on Windows.
+  `kill('SIGTERM')` there terminates the process outright rather than
+  delivering a signal, so the assertion would say nothing about the code. CI is
+  Linux and runs them.
+- The `graceful-shutdown-gate` receipt is red, and the failure is entirely
+  outside this sprint: a concurrent session's `fixtures/` package was mid-write
+  when the gate ran, first failing `tsc -p tsconfig.test.json` on a module it
+  had not written yet, then `eslint` on
+  `fixtures/src/hostile-modes.integration.test.ts`. The same gate command ran
+  green at 11:01 for `entry-points-gate`, over a tree that already contained
+  the graceful shutdown. Re-run `nah task finish repo-foundation
+  graceful-worker-shutdown packages/db/src/jobs.ts
+  packages/db/src/jobs.integration.test.ts packages/db/src/index.ts` once that
+  session's work settles.
+- `nah dev` holds the sprint ledgers open on Windows, so a concurrent
+  `nah task finish` can fail its atomic rename with `EPERM` and strand an
+  `events.jsonl.*.tmp`. NAH's own repository lint then refuses every later
+  command with "unknown sprint root file" until the stray file is removed.
+  Both sprints hit this today. Stopping the dev server during a batch of task
+  finishes avoids it.
 
 ## On-demand review — 2026-09-01
 
@@ -455,3 +592,17 @@ non-throwaway database exists.
 - Assurance request: none
 - Knowledge revisions: none
 - Resume: `nah implement s1`
+
+<!-- nah-checkpoint:ff901314d5dd2ee5 -->
+## 2026-09-01T14:25:04.921Z · claude-code · 42f42e76-c061-427d-86f5-990e573f3993
+
+- Stage: hardening
+- Ready: graceful-worker-shutdown, process-entry-points
+- In progress: pool-error-listener
+- Root blockers: none
+- Done: 8/11
+- Receipts: verification-completed-event515b446bc2ad47d7b3ef161816a06141, verification-completed-eventac7fdd3081104875a118023c521f1268, verification-completed-event2f6e13365a304a65811d035007958a82, verification-completed-event102c42b8b7994768a2b699f5ab18ea5f, verification-completed-event09f778337ce84fac968aeb2508bbaf35, verification-completed-event2ee30b72f1fc4875951c51eb061890d6, verification-completed-event904936ca634c4ddfa7bc8a3bb90662cd, verification-completed-evente24d6cda6e7d480d83321a3c291d8502, verification-completed-event0a9495b75a564f2eb1fa7ddfee0ebb13, verification-completed-eventba6d21010b5442da8f28324710033cce, verification-completed-event26014c25cfbf40658199e6ae2ff7c2a7, verification-completed-eventcb454d1750904f258fc0f7ac0d16b6ed, verification-completed-eventcdb9ceab1ac04b63b5d6ca93a13cce33, verification-completed-eventb4f9e9120d574cf89c05d0f5494a49a6, verification-completed-event62aee50846364146b3c5a774f5a81229, verification-completed-event8e08ca0d1bb04d4d9918a736a1d69445, verification-completed-eventd247b015db5d47839ffef54cfc2f1f87, verification-completed-eventd9166c7f789f4345a050f2de37e42d51, verification-completed-event376ec887c43b4e47aa64de99b0783f4f, verification-completed-eventc7d21f62fa32482cb3fa6e9496e2e947, verification-completed-event7625dffc116d4635a509ad1c285c610b, verification-completed-event6ad140a50eab463890462f4e5daae40b, verification-completed-event3326fc361f2b4473a817357ce8b3ec03, verification-completed-eventf910ff93600d4d1bb76dd188b4951bbd, verification-completed-event31705540346947aabe211adcfafd075e, verification-completed-eventae8eacbbe8c34791b506d4858ba75d4e
+- Findings: none
+- Assurance request: hardening:hardening-h296ba8c1f808be2e
+- Knowledge revisions: none
+- Resume: `nah harden s1`
