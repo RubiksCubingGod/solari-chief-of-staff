@@ -6,6 +6,7 @@ import {
   SCHEMA_TABLE_NAMES,
   bindingCodes,
   calendarItems,
+  deliveries,
   messages,
   observations,
   siteConnections,
@@ -25,6 +26,7 @@ const TABLES: PgTable[] = [
   calendarItems,
   messages,
   bindingCodes,
+  deliveries,
 ];
 
 interface ForeignKeyShape {
@@ -71,7 +73,15 @@ describe('the section 5 schema', () => {
   });
 
   it('deletes a user by cascading through everything the user owns', () => {
-    for (const table of [siteConnections, watches, tasks, calendarItems, messages]) {
+    for (const table of [
+      siteConnections,
+      watches,
+      tasks,
+      calendarItems,
+      messages,
+      bindingCodes,
+      deliveries,
+    ]) {
       expect(foreignKeys(table)).toContainEqual({
         columns: ['user_id'],
         onDelete: 'cascade',
@@ -123,6 +133,9 @@ describe('the section 5 schema', () => {
     expect(indexedColumns(bindingCodes)).toEqual({
       binding_codes_user_id_idx: ['user_id'],
     });
+    expect(indexedColumns(deliveries)).toEqual({
+      deliveries_user_id_created_at_idx: ['user_id', 'created_at'],
+    });
   });
 
   it('transcribes a chat that belongs to nobody yet', () => {
@@ -167,6 +180,22 @@ describe('the section 5 schema', () => {
     expect(columns['expires_at']?.notNull).toBe(true);
     // Unique, or redemption would be ambiguous at the moment it must not be.
     expect(columns['code']?.isUnique).toBe(true);
+  });
+
+  it('records a delivery that was owed before it records what became of it', () => {
+    const columns = Object.fromEntries(
+      getTableConfig(deliveries).columns.map((column) => [column.name, column]),
+    );
+
+    // Written before the send and settled after it, so a process killed
+    // mid-send leaves a row saying a message was owed. `settled_at` is null for
+    // exactly that window, which is what makes a stuck delivery findable.
+    expect(columns['status']?.default).toBe('pending');
+    expect(columns['settled_at']?.notNull).toBe(false);
+    expect(columns['attempts']?.notNull).toBe(true);
+    // The address at the time of sending, not a join to wherever the user lives
+    // now: a rebind must not make an old delivery read as having gone there.
+    expect(columns['chat_id']?.notNull).toBe(true);
   });
 
   it('allows one stored login per site per user', () => {

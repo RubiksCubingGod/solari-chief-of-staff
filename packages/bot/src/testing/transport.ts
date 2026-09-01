@@ -29,7 +29,25 @@ type StubTransformer = (
   method: string,
   payload: Record<string, unknown>,
   signal: TransformerSignal,
-) => Promise<{ ok: true; result: unknown }>;
+) => Promise<StubResponse>;
+
+/**
+ * Either half of what grammY's client understands. The failing half matters:
+ * an `ok: false` body is how a real Telegram refusal reaches grammY, so a test
+ * that scripts one exercises the same `GrammyError` production would see rather
+ * than a fabricated error object.
+ */
+type StubResponse =
+  | { ok: true; result: unknown }
+  | { ok: false; error_code: number; description: string };
+
+/** How the next scripted `sendMessage` behaves. */
+export type SendOutcome =
+  | { readonly kind: 'ok' }
+  /** Telegram answered with an error code, as it does for a blocked bot. */
+  | { readonly kind: 'refused'; readonly errorCode: number; readonly description: string }
+  /** Nothing answered at all, as when the socket dies mid-request. */
+  | { readonly kind: 'unreachable'; readonly message: string };
 
 export interface RecordedCall {
   readonly method: string;
@@ -45,10 +63,19 @@ export interface SentMessage {
 export interface TestTransport {
   readonly transformer: Transformer;
   readonly calls: readonly RecordedCall[];
-  /** Every `sendMessage` so far, oldest first. */
+  /**
+   * Every `sendMessage` that actually got through, oldest first. Scripted
+   * failures are absent from this and present in `calls`, which is the
+   * difference an outbound proof is about.
+   */
   sent(): SentMessage[];
   /** Calls of one method, for asserting a transport registered itself. */
   callsTo(method: string): RecordedCall[];
+  /**
+   * Queues how the next sends behave, oldest first. Anything past the end of
+   * the script succeeds, so a test scripts only the failures it is about.
+   */
+  scriptSends(...outcomes: readonly SendOutcome[]): void;
   clear(): void;
 }
 
@@ -80,9 +107,19 @@ export interface TestTransportOptions {
 export function createTestTransport(options: TestTransportOptions = {}): TestTransport {
   const longPollMs = options.longPollMs ?? 25;
   const calls: RecordedCall[] = [];
+  const delivered: SentMessage[] = [];
+  const script: SendOutcome[] = [];
 
   const stub: StubTransformer = async (_prev, method, payload, signal) => {
     calls.push({ method, payload: { ...payload } });
+    if (method === 'sendMessage') {
+      const outcome = script.shift() ?? { kind: 'ok' };
+      if (outcome.kind === 'unreachable') throw new Error(outcome.message);
+      if (outcome.kind === 'refused') {
+        return { ok: false, error_code: outcome.errorCode, description: outcome.description };
+      }
+      delivered.push({ chatId: String(payload['chat_id']), text: String(payload['text']) });
+    }
     return { ok: true, result: await resultFor(method, longPollMs, signal) };
   };
   // The one cast in this file, and the reason the file never ships: everything
@@ -94,16 +131,15 @@ export function createTestTransport(options: TestTransportOptions = {}): TestTra
     get calls() {
       return calls;
     },
-    sent: () =>
-      calls
-        .filter((call) => call.method === 'sendMessage')
-        .map((call) => ({
-          chatId: String(call.payload['chat_id']),
-          text: String(call.payload['text']),
-        })),
+    sent: () => [...delivered],
     callsTo: (method: string) => calls.filter((call) => call.method === method),
+    scriptSends: (...outcomes: readonly SendOutcome[]) => {
+      script.push(...outcomes);
+    },
     clear: () => {
       calls.length = 0;
+      delivered.length = 0;
+      script.length = 0;
     },
   };
 }

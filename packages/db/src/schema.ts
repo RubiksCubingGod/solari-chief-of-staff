@@ -1,6 +1,7 @@
 import {
   CALENDAR_ITEM_KINDS,
   CALENDAR_ITEM_STATUSES,
+  DELIVERY_STATUSES,
   FETCH_TIERS,
   MESSAGE_CHANNELS,
   MESSAGE_DIRECTIONS,
@@ -46,6 +47,7 @@ export const calendarItemKind = pgEnum('calendar_item_kind', CALENDAR_ITEM_KINDS
 export const calendarItemStatus = pgEnum('calendar_item_status', CALENDAR_ITEM_STATUSES);
 export const messageDirection = pgEnum('message_direction', MESSAGE_DIRECTIONS);
 export const messageChannel = pgEnum('message_channel', MESSAGE_CHANNELS);
+export const deliveryStatus = pgEnum('delivery_status', DELIVERY_STATUSES);
 
 const primaryKeyColumn = () => uuid('id').primaryKey().defaultRandom();
 const timestampColumn = (name: string) => timestamp(name, { withTimezone: true });
@@ -230,6 +232,41 @@ export const bindingCodes = pgTable(
   (table) => [index('binding_codes_user_id_idx').on(table.userId)],
 );
 
+/**
+ * One attempt to put a message in a user's chat, and what became of it.
+ *
+ * Deliberately not the same row as the transcript. `messages` is what the user
+ * was told, and a send that failed was not told to anybody; this is what the
+ * system tried to do and whether it worked, which is the question a reminder in
+ * s7 or a red-run alert in s9 needs answered when nothing arrived. The row is
+ * written `pending` before the send and settled afterwards, so a process killed
+ * mid-send leaves evidence that a message was owed.
+ */
+export const deliveries = pgTable(
+  'deliveries',
+  {
+    id: primaryKeyColumn(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    // The address at the time of sending, stored rather than resolved. A user
+    // who later moves to another chat must not make an old delivery read as
+    // though it went somewhere it did not.
+    chatId: text('chat_id').notNull(),
+    text: text('text').notNull(),
+    status: deliveryStatus('status').notNull().default('pending'),
+    attempts: integer('attempts').notNull().default(0),
+    // The last thing the send was told, kept only when it failed - a successful
+    // delivery that retried once has nothing left to explain.
+    error: text('error'),
+    createdAt: timestampColumn('created_at').notNull().defaultNow(),
+    // Null exactly while the delivery is still pending, which is what makes a
+    // stuck row findable without joining anything.
+    settledAt: timestampColumn('settled_at'),
+  },
+  (table) => [index('deliveries_user_id_created_at_idx').on(table.userId, table.createdAt)],
+);
+
 export const SCHEMA_TABLE_NAMES = [
   'users',
   'site_connections',
@@ -240,6 +277,7 @@ export const SCHEMA_TABLE_NAMES = [
   'calendar_items',
   'messages',
   'binding_codes',
+  'deliveries',
 ] as const;
 
 export type User = typeof users.$inferSelect;
@@ -260,3 +298,5 @@ export type Message = typeof messages.$inferSelect;
 export type NewMessage = typeof messages.$inferInsert;
 export type BindingCode = typeof bindingCodes.$inferSelect;
 export type NewBindingCode = typeof bindingCodes.$inferInsert;
+export type Delivery = typeof deliveries.$inferSelect;
+export type NewDelivery = typeof deliveries.$inferInsert;

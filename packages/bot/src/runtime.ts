@@ -1,11 +1,25 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
-import { Bot, webhookCallback, type Context, type MiddlewareFn, type Transformer } from 'grammy';
+import {
+  Bot,
+  GrammyError,
+  webhookCallback,
+  type Context,
+  type MiddlewareFn,
+  type Transformer,
+} from 'grammy';
 import type { UserFromGetMe } from 'grammy/types';
 
 import { bindChat, type BindingOutcome } from './binding.js';
 import type { BotConfig, BotTransport } from './config.js';
 import { createNoticeGate, type NoticeGate } from './notice-gate.js';
+import {
+  createSendToUser,
+  type ChatSender,
+  type SendAttempt,
+  type SendRetryPolicy,
+  type SendToUser,
+} from './outbound.js';
 import { createRateLimiter, type RateLimiter } from './rate-limit.js';
 import {
   BINDING_ALREADY_DONE,
@@ -31,6 +45,12 @@ export interface BotRuntime {
    * than refusing.
    */
   webhookHandler(): (request: IncomingMessage, response: ServerResponse) => Promise<void>;
+  /**
+   * The single outbound door. Later sprints deliver reminders and alerts
+   * through this rather than reaching for `bot.api` themselves, which is what
+   * keeps every outbound message both transcribed and accounted for.
+   */
+  readonly sendToUser: SendToUser;
   start(): Promise<void>;
   stop(): Promise<void>;
 }
@@ -47,6 +67,10 @@ export interface BotRuntimeOptions {
   readonly transformer?: Transformer;
   /** Supplied by tests so `init` does not have to call `getMe` over a network. */
   readonly botInfo?: UserFromGetMe;
+  /** How hard a failed delivery is retried; defaults to the policy in `outbound.ts`. */
+  readonly sendRetry?: SendRetryPolicy;
+  /** Injected so delivery backoff is provable without waiting through it. */
+  readonly wait?: (ms: number) => Promise<void>;
 }
 
 /**
@@ -90,6 +114,14 @@ export function createBotRuntime(options: BotRuntimeOptions): BotRuntime {
   return {
     transport: config.transport,
     bot,
+    // Sends through `bot.api`, so a delivery crosses the same transformer
+    // stack a reply does and is transcribed by the same one row of code.
+    sendToUser: createSendToUser({
+      db,
+      sender: telegramSender(bot),
+      ...(options.sendRetry === undefined ? {} : { retry: options.sendRetry }),
+      ...(options.wait === undefined ? {} : { wait: options.wait }),
+    }),
 
     webhookHandler() {
       if (config.transport !== 'webhook') {
@@ -126,6 +158,42 @@ export function createBotRuntime(options: BotRuntimeOptions): BotRuntime {
       if (config.transport === 'webhook') return;
       await bot.stop();
     },
+  };
+}
+
+/**
+ * The `ChatSender` port, over grammY. It is here rather than in `outbound.ts`
+ * because deciding whether a failure is worth retrying means reading Telegram's
+ * own error vocabulary, and this file is the only one allowed to know it.
+ */
+function telegramSender(bot: Bot): ChatSender {
+  return {
+    async send(chatId: string, text: string): Promise<SendAttempt> {
+      try {
+        await bot.api.sendMessage(chatId, text);
+        return { ok: true };
+      } catch (error: unknown) {
+        return classifySendFailure(error);
+      }
+    },
+  };
+}
+
+function classifySendFailure(error: unknown): SendAttempt {
+  if (error instanceof GrammyError) {
+    // Telegram answered, and its own code says whether asking again could help.
+    // 429 means slow down and 5xx means not right now; a 400 or a 403 is a fact
+    // about this chat that an identical second request cannot change, and
+    // spending the budget on it delays every delivery queued behind it.
+    const retryable = error.error_code === 429 || error.error_code >= 500;
+    return { ok: false, retryable, reason: `${error.error_code}: ${error.description}` };
+  }
+  // Nothing answered at all - a socket, a DNS failure, a timeout. That is the
+  // case a second attempt exists for.
+  return {
+    ok: false,
+    retryable: true,
+    reason: error instanceof Error ? error.message : String(error),
   };
 }
 
@@ -200,7 +268,7 @@ function transcribeInbound(db: BotDatabase): MiddlewareFn<Context> {
 /**
  * Records every outbound message. This sits in the API layer rather than in a
  * middleware because replies are sent from many places — a handler, a refusal,
- * `sendToUser` in a later task — and only the API call is common to all of them.
+ * `sendToUser` — and only the API call is common to all of them.
  */
 function transcribeOutbound(db: BotDatabase): Transformer {
   return async (prev, method, payload, signal) => {

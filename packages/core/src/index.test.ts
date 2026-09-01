@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CALENDAR_ITEM_KINDS,
   CALENDAR_ITEM_STATUSES,
+  DELIVERY_STATUSES,
   FETCH_TIERS,
   MESSAGE_CHANNELS,
   MESSAGE_DIRECTIONS,
@@ -16,6 +17,7 @@ import {
   WATCH_STATUSES,
   isCalendarItemKind,
   isCalendarItemStatus,
+  isDeliveryStatus,
   isFetchTier,
   isMessageChannel,
   isMessageDirection,
@@ -67,6 +69,7 @@ describe('domain vocabulary', () => {
     { name: 'CALENDAR_ITEM_STATUSES', values: CALENDAR_ITEM_STATUSES, guard: isCalendarItemStatus },
     { name: 'MESSAGE_DIRECTIONS', values: MESSAGE_DIRECTIONS, guard: isMessageDirection },
     { name: 'MESSAGE_CHANNELS', values: MESSAGE_CHANNELS, guard: isMessageChannel },
+    { name: 'DELIVERY_STATUSES', values: DELIVERY_STATUSES, guard: isDeliveryStatus },
   ] as const satisfies readonly {
     name: string;
     values: readonly string[];

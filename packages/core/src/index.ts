@@ -58,6 +58,14 @@ export const MESSAGE_CHANNELS = ['telegram'] as const;
 export type MessageChannel = (typeof MESSAGE_CHANNELS)[number];
 
 /**
+ * The life of one outbound notification. `pending` is written before the send
+ * is attempted, so a process that dies mid-send leaves a row that says a
+ * message was owed rather than leaving no trace of it at all.
+ */
+export const DELIVERY_STATUSES = ['pending', 'sent', 'failed'] as const;
+export type DeliveryStatus = (typeof DELIVERY_STATUSES)[number];
+
+/**
  * Builds a type guard over a closed string list. Used instead of hand-written
  * guards so adding a member to a list cannot leave a stale guard behind.
  */
@@ -81,6 +89,7 @@ export const isSiteConnectionStatus = memberGuard(SITE_CONNECTION_STATUSES);
 export const isCalendarItemStatus = memberGuard(CALENDAR_ITEM_STATUSES);
 export const isMessageDirection = memberGuard(MESSAGE_DIRECTIONS);
 export const isMessageChannel = memberGuard(MESSAGE_CHANNELS);
+export const isDeliveryStatus = memberGuard(DELIVERY_STATUSES);
 
 export {
   BINDING_CODE_ALPHABET,

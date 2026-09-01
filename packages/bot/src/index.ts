@@ -13,6 +13,16 @@ export {
   type RateLimitPolicy,
 } from './config.js';
 export { createNoticeGate, type NoticeGate } from './notice-gate.js';
+export {
+  DEFAULT_SEND_RETRY_POLICY,
+  NoBindingError,
+  createSendToUser,
+  type ChatSender,
+  type SendAttempt,
+  type SendRetryPolicy,
+  type SendToUser,
+  type SendToUserOptions,
+} from './outbound.js';
 export { createRateLimiter, type RateLimiter, type RateLimitVerdict } from './rate-limit.js';
 export {
   BINDING_ALREADY_DONE,

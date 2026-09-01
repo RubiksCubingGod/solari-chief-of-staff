@@ -40,10 +40,23 @@ function sourceFiles(directory: string, found: string[] = []): string[] {
   return found;
 }
 
-/** Every `... from 'grammy...'` line in a file, and whether it is type-only. */
+/**
+ * Every `import ... from 'grammy...'` in a file, and whether it is type-only.
+ *
+ * Deliberately not line-anchored. A grammY import wide enough for the formatter
+ * to break across lines is exactly the shape a growing importer takes, and a
+ * scanner that could not see one would stop enforcing this invariant without
+ * failing — which is the one way a drift proof is worse than no drift proof.
+ */
 function grammyImports(source: string): { statement: string; typeOnly: boolean }[] {
-  return [...source.matchAll(/^import (type )?.*from '(grammy[\w/-]*)';$/gmu)].map((match) => ({
+  // `[^;]` spans newlines but cannot cross the semicolon ending the previous
+  // statement, which is what keeps a multi-line match from starting at an
+  // earlier import and reporting that one's `type` keyword as this one's.
+  const statements = /^import (type )?[^;]*?from '(grammy[\w/-]*)';$/gmu;
+  return [...source.matchAll(statements)].map((match) => ({
     statement: match[0],
+    // Only the leading `import type` erases the whole statement. Inline `type`
+    // specifiers inside a value import do not: the statement still runs.
     typeOnly: match[1] === 'type ',
   }));
 }
@@ -51,6 +64,35 @@ function grammyImports(source: string): { statement: string; typeOnly: boolean }
 const modules = SOURCE_ROOTS.flatMap((root) => sourceFiles(root))
   .map((path) => ({ path, imports: grammyImports(readFileSync(join(repositoryRoot, path), 'utf8')) }))
   .filter(({ imports }) => imports.length > 0);
+
+/**
+ * The scanner above is the whole enforcement, so it is worth its own proof: a
+ * scanner that silently matched nothing would leave every assertion below
+ * passing against an empty list.
+ */
+describe('the scanner the boundary is enforced with', () => {
+  it('sees an import the formatter has broken across lines', () => {
+    const broken = ['import {', '  Bot,', '  GrammyError,', "} from 'grammy';"];
+    // Preceded by a type-only import of something else, which is the shape that
+    // fooled the line-anchored scanner this replaced: it matched from that
+    // statement's `type` keyword all the way to this one's closing quote.
+    const source = ["import type { IncomingMessage } from 'node:http';", '', ...broken].join('\n');
+
+    expect(grammyImports(source)).toEqual([{ statement: broken.join('\n'), typeOnly: false }]);
+  });
+
+  it('still tells a type-only import from a value one', () => {
+    const typeOnly = "import type { Transformer } from 'grammy';";
+    const value = "import { Bot } from 'grammy';";
+
+    expect(grammyImports(typeOnly)[0]?.typeOnly).toBe(true);
+    expect(grammyImports(value)[0]?.typeOnly).toBe(false);
+  });
+
+  it('ignores imports from anywhere else', () => {
+    expect(grammyImports("import { z } from 'zod';")).toEqual([]);
+  });
+});
 
 describe('the Telegram boundary', () => {
   it('is one module, and it is the runtime', () => {
