@@ -57,3 +57,17 @@ No execution handoff yet.
 - Assurance request: none
 - Knowledge revisions: none
 - Resume: `nah implement s3`
+
+<!-- nah-checkpoint:06f8aa81e3a1915e -->
+## 2026-09-01T21:56:49.737Z · claude-code · c9581094-5808-4b5c-9782-87c4d228d40e
+
+- Stage: hardening
+- Ready: harden-non-text-messages
+- In progress: harden-polling-failure-surfaced
+- Root blockers: none
+- Done: 7/9
+- Receipts: none
+- Findings: none
+- Assurance request: hardening:hardening-ha938d86f9a1b5351
+- Knowledge revisions: none
+- Resume: `nah harden s3`
