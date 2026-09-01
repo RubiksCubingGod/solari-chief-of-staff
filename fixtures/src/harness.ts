@@ -20,6 +20,15 @@ export class FixtureStoppedError extends Error {
  * Every fixture's typed control client is built on top of this, so the
  * stopped-instance guard exists in exactly one place.
  */
+/**
+ * Reads a parsed JSON request body as a plain record so a control-plane route
+ * can validate named fields without reaching through `any`. A non-object body
+ * becomes an empty record, which every validator then rejects by field.
+ */
+export function readRecord(body: unknown): Record<string, unknown> {
+  return typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
+}
+
 export type ControlRequest = <TResult>(
   method: 'GET' | 'POST' | 'DELETE',
   path: string,
