@@ -201,3 +201,17 @@ runs. No critical, high or medium implementation gap remains.
 - Assurance request: none
 - Knowledge revisions: none
 - Resume: `nah implement s1c`
+
+<!-- nah-checkpoint:56ae65b533bee5ba -->
+## 2026-09-01T20:12:27.812Z · claude-code · 51522b6a-8e7b-496e-8bbd-9ba19dc976a1
+
+- Stage: hardening
+- Ready: none
+- In progress: none
+- Root blockers: none
+- Done: 5/5
+- Receipts: verification-completed-eventec080702588541d386e48ad5e2390023, verification-completed-event24e6d36e25234c8aa18f546f6d6cedbd, verification-completed-event0b6fa0f3101f48e98ec63bea73d9076d, verification-completed-event5f906eee98ba4f9ab62c97e37dc5e029, verification-completed-event45fee2f370b740299b34d72d69cc2d38, verification-completed-event44698e11ce644c92b69207245a3ff19c, verification-completed-event3b2ab2d8c94a4413871eb6b67ed18ecf, verification-completed-event6b46818225354f33a35e13d2d5d722ab, verification-completed-event60fecebebf6642778046bdbbbc2a2882, verification-completed-event238a025712c44919910eee631cf89d74, verification-completed-eventd901484cda4b486fa4bb23865796afd5, verification-completed-event05c24770c51a4c18922015bb716a9a67, verification-completed-event1989659ead084a9ebd87420a8568aeca, verification-completed-eventc1c90a4163a14c4e8b9860ae3cecc168, verification-completed-event7b5539d33a644c4b9051c2c5e79e37da, verification-completed-eventb0959411adca471f9dd54a6d6f43ae3b, verification-completed-event0cb8b40177da4f65b543d8307a42156b, verification-completed-event56260cef70504748990d0eb0e4b7a754, verification-completed-event26e34e5c4833495da64ded0fd263ebbd, verification-completed-event3a20084fa67343688b090ec043ebc37b, verification-completed-event480063bf16eb416e82f6d59d744f46f8, verification-completed-eventdd1c073e3150434689b9726dba5f50e9, verification-completed-event440e2cce14704cb5a1c8e6f2e1b6cdea, verification-completed-eventfa0cd07613c3468eab1337e97fd8edd4, verification-completed-event10e0d1cde163410b8303fd0f89f569b6, verification-completed-event2a43f30bebf74be3b08c0073b181a99c, verification-completed-eventb72a532229304b21b4b9cda1be70a188, verification-completed-event583cb01e62ea438787806f3f39933a87, verification-completed-event4bc6aeb4933c409f97568cec6d8beeca, verification-completed-evente7838226c4b745f08870af6396a8bed7, verification-completed-event78bb1ab31e674e5d8ed618b939e55256, verification-completed-eventd6dd2e34fc304e0ea6fd2e04d278df94, verification-completed-eventbf6708b0314f41de91d040d962ed577e, verification-completed-event7068bcac3be142769ce93ff9c2d816f0, verification-completed-event5d1c9b264a5b47efb282a1a8f50d31b4, verification-completed-event387dcf8ed7d2454482f7045c811ca060, verification-completed-event6c3791941b374d54b96d9426b5336c11, verification-completed-eventfa0ae6603ad7429986b91876fe9b0ec9
+- Findings: none
+- Assurance request: hardening:hardening-h4d73e9feb85c3358
+- Knowledge revisions: none
+- Resume: `nah harden s1c`
