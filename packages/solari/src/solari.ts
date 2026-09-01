@@ -64,6 +64,7 @@ export interface SolariSessionHandle {
   readonly proxy: { timezoneId: string; country: string; tier?: string } | undefined;
   readonly storageState: StorageState | null | undefined;
   contexts(): BrowserContext[];
+  newContext(): Promise<BrowserContext>;
   close(): Promise<void>;
 }
 
@@ -269,6 +270,39 @@ export function describeSolariFailure(error: unknown): never {
   });
 }
 
+/**
+ * The browser context to drive the session through.
+ *
+ * The vendor's own type comment says "Sessions ship with a default context at
+ * `contexts()[0]`". They do not. A freshly launched session reports zero
+ * contexts, and one appears only once something opens it — observed against the
+ * real gateway on Chromium 151.0.7922.34, and the reason the first live smoke
+ * aborted on every acquire. So this opens the context rather than trusting the
+ * comment, while still reusing a shipped one if the vendor ever starts
+ * providing it: a second context would be silent waste, not a failure, and
+ * nothing downstream would notice.
+ */
+async function ensureContext(handle: SolariSessionHandle): Promise<BrowserContext> {
+  const shipped = handle.contexts()[0];
+  if (shipped !== undefined) return shipped;
+
+  try {
+    return await handle.newContext();
+  } catch (error) {
+    // The session is already created and already billable. Closing it here is
+    // what stops a context failure from holding the slot until the plan
+    // deadline; the original error is what the caller needs, so a failure to
+    // close must not replace it.
+    await handle.close().catch(() => undefined);
+    throw new BrowserProviderError('solari session arrived without a usable browser context', {
+      kind: 'internal',
+      provider: PROVIDER_NAME,
+      retryable: false,
+      cause: error,
+    });
+  }
+}
+
 export function createSolariProvider(options: SolariProviderOptions = {}): BrowserProvider {
   const report = options.onReleaseFailure ?? reportReleaseFailureToConsole;
   const client = options.client ?? buildClient(options);
@@ -296,15 +330,7 @@ export function createSolariProvider(options: SolariProviderOptions = {}): Brows
     // registered until we hold a session we are responsible for.
     const handle = await client.launch(toCreateOptions(request)).catch(describeSolariFailure);
 
-    const context = handle.contexts()[0];
-    if (context === undefined) {
-      await handle.close();
-      throw new BrowserProviderError('solari session arrived without its default context', {
-        kind: 'internal',
-        provider: PROVIDER_NAME,
-        retryable: false,
-      });
-    }
+    const context = await ensureContext(handle);
 
     const meta = toSessionMeta(handle, request);
     const { released, release } = createReleaseOnce(async () => {

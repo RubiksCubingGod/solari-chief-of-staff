@@ -30,11 +30,23 @@ interface FakeClientOptions {
   readonly sessions?: FakeSession[];
   readonly launchError?: Error;
   readonly closeError?: Error;
+  /**
+   * What `contexts()` reports on a fresh session. `'none'` is what a real
+   * Solari session does; `'default'` is what the vendor's own type comment
+   * claims it does. Both are exercised, because a provider that only works
+   * against the documentation is a provider that only works on paper.
+   */
+  readonly contexts?: 'default' | 'none';
+  readonly newContextError?: Error;
 }
 
 interface FakeClient extends SolariClient {
   readonly launches: Record<string, unknown>[];
   readonly closedSessionIds: string[];
+  /** The contexts sessions shipped with, in launch order. Empty under `'none'`. */
+  readonly defaultContexts: BrowserContext[];
+  /** How many contexts the provider had to open for itself. */
+  readonly contextsOpened: () => number;
   clientClosed: boolean;
   closedAfterReleases: number | undefined;
 }
@@ -42,11 +54,15 @@ interface FakeClient extends SolariClient {
 function createFakeClient(options: FakeClientOptions = {}): FakeClient {
   const launches: Record<string, unknown>[] = [];
   const closedSessionIds: string[] = [];
+  const defaultContexts: BrowserContext[] = [];
+  let contextsOpened = 0;
   let minted = 0;
 
   const client: FakeClient = {
     launches,
     closedSessionIds,
+    defaultContexts,
+    contextsOpened: () => contextsOpened,
     clientClosed: false,
     closedAfterReleases: undefined,
     launch: (launchOptions) => {
@@ -55,12 +71,21 @@ function createFakeClient(options: FakeClientOptions = {}): FakeClient {
       const seed = options.sessions?.[minted] ?? {};
       const id = seed.id ?? `solari-${String(minted)}`;
       minted += 1;
+      const shipped =
+        options.contexts === 'none' ? undefined : ({} as unknown as BrowserContext);
+      if (shipped !== undefined) defaultContexts.push(shipped);
+
       const handle: SolariSessionHandle = {
         id,
         expiresAt: seed.expiresAt ?? '2026-09-01T18:00:00.000Z',
         proxy: seed.proxy,
         storageState: seed.storageState,
-        contexts: () => [{} as unknown as BrowserContext],
+        contexts: () => (shipped === undefined ? [] : [shipped]),
+        newContext: () => {
+          if (options.newContextError !== undefined) return Promise.reject(options.newContextError);
+          contextsOpened += 1;
+          return Promise.resolve({} as unknown as BrowserContext);
+        },
         close: () => {
           if (options.closeError !== undefined) return Promise.reject(options.closeError);
           closedSessionIds.push(id);
@@ -445,18 +470,49 @@ describe('provider identity', () => {
     await provider.dispose();
   });
 
-  it('fails loudly when a session ships without its default context', async () => {
+  it('opens the context itself when the session ships without one', async () => {
+    // The vendor's type comment says "Sessions ship with a default context at
+    // contexts()[0]". They do not. A real session reports zero contexts until
+    // something opens one, and the first live run aborted on every single
+    // acquire because this provider believed the comment. Observed against the
+    // real gateway: Chromium 151.0.7922.34, launch ~750ms, contexts().length 0,
+    // rising to 1 only after a page was opened.
+    const client = createFakeClient({ contexts: 'none' });
+    const provider = createSolariProvider({ client });
+
+    const session = await provider.acquire(STEALTH);
+
+    expect(session.context).toBeDefined();
+    expect(client.contextsOpened()).toBe(1);
+    await provider.dispose();
+  });
+
+  it('reuses the shipped context when a session does come with one', async () => {
+    // The documented shape, kept covered: if the vendor starts honouring its
+    // own comment, opening a second context would be a silent waste rather
+    // than a failure, and nothing else would notice.
     const client = createFakeClient();
-    const broken: SolariClient = {
-      launch: async (options) => {
-        const handle = await client.launch(options);
-        return { ...handle, contexts: () => [] };
-      },
-      close: () => client.close(),
-    };
-    const provider = createSolariProvider({ client: broken });
+    const provider = createSolariProvider({ client });
+
+    const session = await provider.acquire(STEALTH);
+
+    expect(session.context).toBe(client.defaultContexts[0]);
+    expect(client.contextsOpened()).toBe(0);
+    await provider.dispose();
+  });
+
+  it('fails loudly, and releases the slot, when no context can be had at all', async () => {
+    const client = createFakeClient({
+      contexts: 'none',
+      newContextError: new Error('no context for you'),
+    });
+    const provider = createSolariProvider({ client });
 
     await expect(provider.acquire(STEALTH)).rejects.toThrow(BrowserProviderError);
+    // The session was created and is billable; failing without closing it would
+    // hold the slot until the plan deadline.
+    expect(client.closedSessionIds).toEqual(['solari-0']);
+    expect(provider.liveSessionIds()).toEqual([]);
   });
 });
 
