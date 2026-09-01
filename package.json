@@ -10,12 +10,12 @@
   "scripts": {
     "lint": "eslint .",
     "typecheck": "tsc --build --force && tsc -p tsconfig.test.json",
-    "test": "vitest run --coverage",
-    "test:unit": "vitest run --project unit",
-    "test:integration": "vitest run --project integration",
+    "test": "node scripts/vitest.mjs run --coverage",
+    "test:unit": "node scripts/vitest.mjs run --project unit",
+    "test:integration": "node scripts/vitest.mjs run --project integration",
     "build": "tsc --build",
     "clean": "tsc --build --clean",
-    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+    "check": "node scripts/check.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
