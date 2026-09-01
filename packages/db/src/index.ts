@@ -10,6 +10,7 @@ export {
   type JobRecord,
   type JobRegistration,
   type RetryPolicy,
+  type StopOptions,
 } from './jobs.js';
 export { runMigrations } from './migrate.js';
 export * from './schema.js';

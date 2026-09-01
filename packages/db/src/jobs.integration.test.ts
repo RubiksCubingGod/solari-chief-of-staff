@@ -128,6 +128,100 @@ describe('the pg-boss job harness', () => {
   );
 });
 
+/**
+ * A watch check that is halfway through a browser session must not be failed
+ * just because the worker is being replaced: pg-boss hands a failed-in-flight
+ * job to the next process, which runs the same side effect a second time.
+ * Shutdown therefore drains what is already running, and only a caller that
+ * explicitly asks for the fast path gives that up.
+ */
+describe('shutting the harness down', () => {
+  /** Long enough that the handler is unambiguously mid-flight when stop() lands. */
+  const HANDLER_MILLISECONDS = 3_000;
+
+  /** No retries, so a job failed at shutdown lands in `failed` rather than `retry`. */
+  const NO_RETRIES = { retryLimit: 0, retryDelaySeconds: 0 };
+
+  async function runningHandler(
+    queue: string,
+    state: { entered: boolean; returned: boolean },
+    options: Partial<Parameters<typeof createJobHarness>[0]> = {},
+  ): Promise<{ worker: JobHarness; id: string }> {
+    const worker = await harness({ retryPolicy: NO_RETRIES, ...options });
+    await worker.register(queue, async () => {
+      state.entered = true;
+      await new Promise((resolve) => setTimeout(resolve, HANDLER_MILLISECONDS));
+      state.returned = true;
+    });
+
+    const id = await worker.enqueue(queue, {});
+    await vi.waitFor(
+      () => {
+        expect(state.entered).toBe(true);
+      },
+      { timeout: 20_000, interval: 50 },
+    );
+
+    started.splice(started.indexOf(worker), 1);
+    return { worker, id };
+  }
+
+  it(
+    'waits for a handler that is already running, so its job completes',
+    async () => {
+      const queue = queueName('draining');
+      const state = { entered: false, returned: false };
+      const { worker, id } = await runningHandler(queue, state);
+
+      await worker.stop();
+
+      expect(state.returned).toBe(true);
+
+      const observer = await harness();
+      expect((await observer.inspect(queue, id))?.state).toBe('completed');
+    },
+    60_000,
+  );
+
+  it(
+    'abandons the drain only when the caller asks for the fast path',
+    async () => {
+      const queue = queueName('abandoned');
+      const state = { entered: false, returned: false };
+      const { worker, id } = await runningHandler(queue, state);
+
+      await worker.stop({ graceful: false });
+
+      expect(state.returned).toBe(false);
+
+      const observer = await harness();
+      expect((await observer.inspect(queue, id))?.state).toBe('failed');
+    },
+    60_000,
+  );
+
+  it(
+    'stops waiting once the shutdown window is spent',
+    async () => {
+      const queue = queueName('wedged');
+      const state = { entered: false, returned: false };
+      // pg-boss floors the window at one second, and the handler outlasts it.
+      const { worker, id } = await runningHandler(queue, state, { shutdownTimeoutSeconds: 1 });
+
+      const startedAt = Date.now();
+      await worker.stop();
+      const elapsed = Date.now() - startedAt;
+
+      expect(state.returned).toBe(false);
+      expect(elapsed).toBeLessThan(HANDLER_MILLISECONDS);
+
+      const observer = await harness();
+      expect((await observer.inspect(queue, id))?.state).toBe('failed');
+    },
+    60_000,
+  );
+});
+
 describe('runWorker', () => {
   it('starts the harness, applies every registration, and hands back a shutdown', async () => {
     const instance = build();

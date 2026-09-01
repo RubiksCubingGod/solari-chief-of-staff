@@ -19,7 +19,25 @@ export interface JobHarnessOptions {
   readonly retryPolicy?: RetryPolicy;
   readonly pollingIntervalSeconds?: number;
   readonly cronIntervalSeconds?: number;
+  readonly shutdownTimeoutSeconds?: number;
   readonly onError?: (error: Error) => void;
+}
+
+/**
+ * How long shutdown waits for handlers that are already running before it gives
+ * up and fails them. Thirty seconds is longer than a watch check or a booking
+ * step normally takes, and short enough that one wedged job cannot hold a
+ * deploy open indefinitely.
+ */
+const DEFAULT_SHUTDOWN_TIMEOUT_SECONDS = 30;
+
+export interface StopOptions {
+  /**
+   * Abandon the drain and fail whatever is still running. For a caller that
+   * would rather lose the in-flight job than wait — a test tearing a harness
+   * down between cases, never a worker process being replaced.
+   */
+  readonly graceful?: boolean;
 }
 
 /** Handlers take one job at a time; batching stays an implementation detail. */
@@ -38,7 +56,7 @@ export interface JobHarness {
   enqueue(queue: string, payload: object): Promise<string>;
   schedule(queue: string, cron: string, payload?: object): Promise<void>;
   inspect(queue: string, jobId: string): Promise<JobRecord | null>;
-  stop(): Promise<void>;
+  stop(options?: StopOptions): Promise<void>;
 }
 
 export type JobRegistration = (harness: JobHarness) => Promise<void>;
@@ -61,6 +79,7 @@ export function logHarnessError(
 export function createJobHarness(options: JobHarnessOptions): JobHarness {
   const retryPolicy = options.retryPolicy ?? DEFAULT_RETRY_POLICY;
   const pollingIntervalSeconds = options.pollingIntervalSeconds ?? 2;
+  const shutdownTimeoutSeconds = options.shutdownTimeoutSeconds ?? DEFAULT_SHUTDOWN_TIMEOUT_SECONDS;
   const boss = new PgBoss({
     connectionString: options.connectionString,
     schema: options.schema ?? 'pgboss',
@@ -126,8 +145,15 @@ export function createJobHarness(options: JobHarnessOptions): JobHarness {
         : { id: job.id, state: job.state, attempts: job.retryCount, output: job.output };
     },
 
-    async stop(): Promise<void> {
-      await boss.stop({ close: true, graceful: false });
+    async stop(stopOptions?: StopOptions): Promise<void> {
+      // Draining lets a handler finish the side effect it already started.
+      // Failing it instead would hand the same job to the next process, which
+      // would book the same slot or send the same message a second time.
+      await boss.stop({
+        close: true,
+        graceful: stopOptions?.graceful ?? true,
+        timeout: shutdownTimeoutSeconds * 1000,
+      });
     },
   };
 }
