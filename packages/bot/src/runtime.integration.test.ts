@@ -4,10 +4,16 @@ import { asc } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { loadBotConfig, type BotConfig } from './config.js';
-import { HOW_TO_BIND, RATE_LIMIT_NOTICE } from './replies.js';
+import { HOW_TO_BIND, RATE_LIMIT_NOTICE, TEXT_ONLY } from './replies.js';
 import type { ChatLoop } from './routing.js';
 import { createBotRuntime, type BotRuntime } from './runtime.js';
-import { TEST_BOT_INFO, createTestTransport, textUpdate, type TestTransport } from './testing/transport.js';
+import {
+  TEST_BOT_INFO,
+  createTestTransport,
+  photoUpdate,
+  textUpdate,
+  type TestTransport,
+} from './testing/transport.js';
 
 /**
  * The bot runtime against a real database and a test transport: no network, no
@@ -203,6 +209,24 @@ describe('transcript persistence', () => {
     expect(await transcript()).toEqual([
       { direction: 'inbound', chatId: UNBOUND_CHAT, text: 'hello?', userId: null },
       { direction: 'outbound', chatId: UNBOUND_CHAT, text: HOW_TO_BIND, userId: null },
+    ]);
+  });
+
+  it('records a message it cannot read and says so, rather than going silent', async () => {
+    const transport = createTestTransport();
+    const runtime = runtimeFor(configFor(), transport);
+
+    await runtime.bot.handleUpdate(photoUpdate(BOUND_CHAT));
+
+    // A photo or a voice note is somebody asking for something, and this
+    // sprint reads text and nothing else. Dropping it left them in a chat that
+    // answered their last message and not this one, with nothing in the
+    // transcript to explain the gap — indistinguishable, from their side, from
+    // a bot that had died.
+    expect(transport.sent()).toEqual([{ chatId: BOUND_CHAT, text: TEXT_ONLY }]);
+    expect(await transcript()).toEqual([
+      { direction: 'inbound', chatId: BOUND_CHAT, text: '[photo]', userId: boundUserId },
+      { direction: 'outbound', chatId: BOUND_CHAT, text: TEXT_ONLY, userId: boundUserId },
     ]);
   });
 

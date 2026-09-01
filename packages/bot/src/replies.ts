@@ -55,3 +55,15 @@ export const ANSWER_RECORDED =
  */
 export const ASSISTANT_UNAVAILABLE =
   'Something went wrong on my side before I could deal with that, so nothing has changed. Please send it again in a moment.';
+
+/**
+ * What somebody who sent a photo, a voice note or a location is told.
+ *
+ * The alternative was silence, which is the worst answer available: the same
+ * chat answered their last message, so nothing distinguishes "I cannot read
+ * this" from "I am broken" or "I am ignoring you". It says the limit is the
+ * format rather than the request, because the request is probably fine and
+ * they only have to retype it.
+ */
+export const TEXT_ONLY =
+  'I can only read text, so I have not acted on that. Tell me in words what you would like, and I will.';

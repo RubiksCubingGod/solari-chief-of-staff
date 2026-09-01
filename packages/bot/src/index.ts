@@ -36,6 +36,7 @@ export {
   BINDING_USER_TAKEN,
   HOW_TO_BIND,
   RATE_LIMIT_NOTICE,
+  TEXT_ONLY,
 } from './replies.js';
 export {
   createTaskEventAnswerSink,

@@ -218,6 +218,24 @@ export function textUpdate(chatId: string, text: string, updateId = nextUpdateId
   };
 }
 
+/**
+ * A private photo message: the shape of everything this sprint cannot read.
+ * Photos stand in for voice notes, locations and stickers because they all
+ * reach a text-only bot the same way — a message with no `text` on it.
+ */
+export function photoUpdate(chatId: string, updateId = nextUpdateId()): Update {
+  return {
+    update_id: updateId,
+    message: {
+      message_id: updateId,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: Number(chatId), type: 'private', first_name: 'Tester' },
+      from: { id: Number(chatId), is_bot: false, first_name: 'Tester' },
+      photo: [{ file_id: 'photo-1', file_unique_id: 'photo-1', width: 90, height: 90 }],
+    },
+  };
+}
+
 let updateCounter = 0;
 function nextUpdateId(): number {
   updateCounter += 1;

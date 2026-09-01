@@ -8,7 +8,7 @@ import {
   type MiddlewareFn,
   type Transformer,
 } from 'grammy';
-import type { UserFromGetMe } from 'grammy/types';
+import type { Message, UserFromGetMe } from 'grammy/types';
 
 import { bindChat, type BindingOutcome } from './binding.js';
 import type { BotConfig, BotTransport } from './config.js';
@@ -31,6 +31,7 @@ import {
   BINDING_USER_TAKEN,
   HOW_TO_BIND,
   RATE_LIMIT_NOTICE,
+  TEXT_ONLY,
 } from './replies.js';
 import {
   createTaskEventAnswerSink,
@@ -314,24 +315,68 @@ function requireBinding(db: BotDatabase, gate: NoticeGate): MiddlewareFn<Context
 function route(db: BotDatabase, options: RouteMessageOptions): MiddlewareFn<Context> {
   return async (ctx) => {
     const chatId = ctx.chat?.id;
+    if (chatId === undefined) return;
     const text = ctx.message?.text;
-    // Not a text message from a chat: nothing this sprint knows how to route,
-    // and already on the record from the way in.
-    if (chatId === undefined || text === undefined) return;
+    if (text === undefined) {
+      // A message this sprint cannot read, and text is the whole of what it
+      // can. It is answered rather than dropped because the alternative is
+      // silence in a chat that answers everything else, which reads as a bot
+      // that has died: the sender waits for a reply instead of retyping.
+      // Updates carrying no message at all — edits, channel posts — are not
+      // messages anybody is waiting on and get nothing.
+      if (ctx.message !== undefined) await ctx.reply(TEXT_ONLY);
+      return;
+    }
     await ctx.reply(await routeMessage(db, options, { chatId: String(chatId), text }));
   };
 }
 
-/** Records every inbound text message, before anything can decide to refuse it. */
+/**
+ * Records every inbound message before anything can decide to refuse it,
+ * including the ones nothing downstream can read. A photo left out of the
+ * transcript is a conversation with a hole in it, and the hole sits exactly
+ * where somebody would look to find out why they never got an answer.
+ */
 function transcribeInbound(db: BotDatabase): MiddlewareFn<Context> {
   return async (ctx, next) => {
     const chatId = ctx.chat?.id;
-    const text = ctx.message?.text;
-    if (chatId !== undefined && text !== undefined) {
-      await recordMessage(db, { chatId: String(chatId), direction: 'inbound', text });
+    const message = ctx.message;
+    if (chatId !== undefined && message !== undefined) {
+      await recordMessage(db, {
+        chatId: String(chatId),
+        direction: 'inbound',
+        text: message.text ?? `[${inboundKind(message)}]`,
+      });
     }
     await next();
   };
+}
+
+/**
+ * Telegram's own name for whatever arrived, when it was not text.
+ *
+ * The transcript column holds text, so a photo has to be written down as
+ * something. A bracketed kind is unmistakably a marker rather than words a
+ * person typed, which neither an empty string nor a caption would be.
+ */
+const NON_TEXT_KINDS = [
+  'photo',
+  'voice',
+  'audio',
+  'video',
+  'video_note',
+  'animation',
+  'document',
+  'sticker',
+  'location',
+  'contact',
+  'poll',
+  'dice',
+  'venue',
+] as const satisfies readonly (keyof Message)[];
+
+function inboundKind(message: Message): string {
+  return NON_TEXT_KINDS.find((kind) => message[kind] !== undefined) ?? 'message';
 }
 
 /**
