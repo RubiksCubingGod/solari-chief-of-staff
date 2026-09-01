@@ -14,3 +14,4 @@ export {
 } from './jobs.js';
 export { runMigrations } from './migrate.js';
 export * from './schema.js';
+export { startWorker, type WorkerProcess } from './worker.js';

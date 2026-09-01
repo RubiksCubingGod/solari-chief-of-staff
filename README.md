@@ -45,7 +45,14 @@ passes here it passes there.
 | `pnpm test:integration` | Integration tests only — needs Docker or `TEST_DATABASE_URL`. |
 | `pnpm build` | Compiles every package through its project references. |
 | `pnpm migrate` | Applies the migration set to `DATABASE_URL`. |
+| `pnpm start` | Runs the API server on `HOST` and `PORT`. |
+| `pnpm worker` | Runs the job worker pool. |
 | `pnpm clean` | Removes build output. |
+
+`pnpm start` and `pnpm worker` are the two long-running processes: one
+deployable unit runs both against the same Postgres (ARCHITECTURE §2). Each
+prints what it bound or started, and shuts down on `SIGTERM` — finishing the
+request or the job it is already handling before the process exits.
 
 To change the schema, edit `packages/db/src/schema.ts`, then run
 `pnpm --filter @chief-of-staff/db generate` to write a new migration, and
