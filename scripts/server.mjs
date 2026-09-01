@@ -41,9 +41,13 @@ async function run() {
     process.exit(1);
     return;
   }
-  process.stdout.write(`server: listening on ${server.url}\n`);
+  // Registered before the process announces itself. Whatever reads that line -
+  // a test, a supervisor, a deploy rolling back - may send SIGTERM the instant
+  // it appears, and a signal arriving before the handler exists terminates the
+  // process outright, losing the in-flight request the drain exists to protect.
   shutdownOn(['SIGTERM', 'SIGINT'], async () => {
     await server.stop();
     process.stdout.write('server: stopped\n');
   });
+  process.stdout.write(`server: listening on ${server.url}\n`);
 }

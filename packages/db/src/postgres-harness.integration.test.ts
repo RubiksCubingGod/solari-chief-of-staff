@@ -39,15 +39,11 @@ describe('startTestPostgres', () => {
     try {
       await firstDatabase.db.execute(sql`create table only_in_first (id integer primary key)`);
 
-      const names = await Promise.all(
-        [firstDatabase, secondDatabase].map(async (database) => {
-          const result = await database.db.execute<{ name: string }>(
-            sql`select current_database() as name`,
-          );
-          return result.rows[0]?.name;
-        }),
-      );
-      expect(names[0]).not.toBe(names[1]);
+      // Two callers must not share a database. Which half of the connection
+      // differs depends on the path: a container per caller keeps the name `test`
+      // and changes the port, while a shared TEST_DATABASE_URL server keeps the
+      // port and changes the name. The whole string is what both paths change.
+      expect(first.connectionString).not.toBe(second.connectionString);
 
       const visible = await secondDatabase.db.execute<{ count: number }>(
         sql`select count(*)::int as count from information_schema.tables where table_name = 'only_in_first'`,

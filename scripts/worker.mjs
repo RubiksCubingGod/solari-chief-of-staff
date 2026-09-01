@@ -52,9 +52,12 @@ async function run() {
     process.exit(1);
     return;
   }
-  process.stdout.write('worker: ready\n');
+  // Registered before the process announces itself, for the reason spelled out
+  // in scripts/server.mjs: a SIGTERM that lands between the announcement and
+  // the handler kills the process, and here that abandons a running job.
   shutdownOn(['SIGTERM', 'SIGINT'], async () => {
     await worker.stop();
     process.stdout.write('worker: stopped\n');
   });
+  process.stdout.write('worker: ready\n');
 }
