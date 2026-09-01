@@ -106,6 +106,36 @@ profiles:
       model: gpt-5.6-sol
       effort: max
       harness: codex
+  # Opt-in fallback for a machine with no codex CLI. Selected per invocation
+  # with `--profile claude-only`; portable-default stays the default so
+  # hardening and review go back to a different harness than implementation
+  # as soon as codex is installed.
+  claude-only:
+    planning:
+      model: claude-opus-5
+      effort: high
+      harness: claude-code
+    implementation:
+      model: claude-opus-5
+      harness: claude-code
+      permissions:
+        permission_mode: bypassPermissions
+    hardening:
+      model: claude-opus-5
+      effort: xhigh
+      harness: claude-code
+    review:
+      model: claude-opus-5
+      effort: xhigh
+      harness: claude-code
+    unblock:
+      model: claude-opus-5
+      effort: high
+      harness: claude-code
+    architecture:
+      model: claude-opus-5
+      effort: max
+      harness: claude-code
 retry:
   resource_pressure:
     delays:
