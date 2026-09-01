@@ -1,14 +1,45 @@
 {
+  "$schema": "https://json.schemastore.org/tsconfig",
   "extends": "../../tsconfig.base.json",
+  // The dashboard is an application, not a library: Next owns its build, so
+  // this project emits nothing and is deliberately absent from the root
+  // `tsc --build` graph. The repository-wide strict check still covers this
+  // source through `tsconfig.test.json`; what this file adds is the second
+  // opinion Next itself holds it to during `next build`.
   "compilerOptions": {
-    "rootDir": "src",
-    "outDir": "dist"
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    // Next ships no `exports` map and no ESM entry points, so Node's own
+    // resolution cannot find `next/link` at all and reads `next`'s default
+    // export as a namespace. The bundler that actually builds this package is
+    // the thing whose resolution has to be modelled. That is also why relative
+    // imports here carry no `.js` extension, unlike the rest of the workspace:
+    // Turbopack only maps `.js` back to `.ts` when it is told resolution is
+    // Node's, and this package is the one place where it is not.
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "jsx": "preserve",
+    "allowJs": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "incremental": true,
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ]
   },
   "include": [
-    "src/**/*.ts"
+    "next-env.d.ts",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    ".next/types/**/*.ts"
   ],
   "exclude": [
-    "src/**/*.test.ts",
-    "src/**/*.integration.test.ts"
+    "node_modules"
   ]
 }

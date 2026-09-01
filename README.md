@@ -77,7 +77,7 @@ To change the schema, edit `packages/db/src/schema.ts`, then run
 | `packages/agent` | The Claude layer — arrives in a later sprint. |
 | `packages/playbooks` | Scripted site flows — arrives in a later sprint. |
 | `packages/bot` | The Telegram bot: the one runtime every Telegram message crosses, and the transcript it writes. |
-| `packages/web` | The dashboard — arrives in a later sprint. |
+| `packages/web` | The Next.js dashboard: the shell its pages land in, and the HTTP client it reads them through. Lint refuses a database import here — the API is the only door. |
 | `fixtures` | Local fixture sites the engines are tested against. |
 
 ## Tests

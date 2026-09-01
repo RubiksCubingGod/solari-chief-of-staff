@@ -1,5 +1,9 @@
 {
   "files": [],
+  // packages/web is deliberately absent below: it is an application Next
+  // builds, it emits nothing for anything here to reference, and a `noEmit`
+  // project cannot be a composite one. `scripts/check.mjs` builds it with
+  // `next build`, which type-checks it against packages/web/tsconfig.json.
   "references": [
     {
       "path": "./packages/core"
@@ -21,9 +25,6 @@
     },
     {
       "path": "./packages/bot"
-    },
-    {
-      "path": "./packages/web"
     },
     {
       "path": "./fixtures"
