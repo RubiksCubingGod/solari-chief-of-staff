@@ -1,4 +1,4 @@
-export { createDatabase, type Database } from './client.js';
+export { createDatabase, logPoolError, type Database } from './client.js';
 export {
   DEFAULT_RETRY_POLICY,
   createJobHarness,

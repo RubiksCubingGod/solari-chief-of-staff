@@ -12,8 +12,27 @@ export interface Database {
   close(): Promise<void>;
 }
 
-export function createDatabase(connectionString: string): Database {
+/**
+ * `pg` reports a connection that failed while idle on the pool's `error` event
+ * rather than by rejecting anything a caller is awaiting, and an EventEmitter
+ * that emits `error` with no listener terminates the process. The pool always
+ * gets a listener for the same reason the job harness does.
+ */
+export function logPoolError(
+  error: Error,
+  write: (line: string) => void = (line) => {
+    console.error(line);
+  },
+): void {
+  write(`[db] postgres pool reported an error: ${error.message}`);
+}
+
+export function createDatabase(
+  connectionString: string,
+  onError: (error: Error) => void = logPoolError,
+): Database {
   const pool = new Pool({ connectionString });
+  pool.on('error', onError);
   return {
     db: drizzle(pool),
     pool,

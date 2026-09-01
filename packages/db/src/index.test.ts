@@ -6,6 +6,7 @@ import * as db from './index.js';
 describe('@chief-of-staff/db', () => {
   it('exposes the shared client factory, the migration runner, and the job harness', () => {
     expect(typeof db.createDatabase).toBe('function');
+    expect(typeof db.logPoolError).toBe('function');
     expect(typeof db.runMigrations).toBe('function');
     expect(typeof db.createJobHarness).toBe('function');
     expect(typeof db.runWorker).toBe('function');
