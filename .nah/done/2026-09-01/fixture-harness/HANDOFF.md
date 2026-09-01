@@ -29,11 +29,28 @@ sees the content a plain fetch could not *and* reads `fixture-state:normal` off 
 document, and a browser-driven walk of the fakegym cancellation flow. Neither should need a fixture change — the markup already carries accessible names and
 `data-testid` hooks for exactly this.
 
-**The full `pnpm check` has never run green on this workstation.** No container runtime is installed
-(no `docker` on PATH, no Docker Desktop) and there is no local Postgres for `TEST_DATABASE_URL`, so
-every Testcontainers-dependent integration file fails. This predates the sprint and is already
-recorded in the repo-foundation review. Nothing under `fixtures/` needs a container — the sprint is
-scoped "No Postgres" — and all 58 fixture proofs pass.
+**The container-runtime blocker is resolved; the note is kept for the trail.** For this sprint's
+whole life the full `pnpm check` could not run green here: no container runtime (no `docker` on
+PATH, no Docker Desktop) and no local Postgres for `TEST_DATABASE_URL`, so every
+Testcontainers-dependent integration file failed. Nothing under `fixtures/` was ever affected — the
+sprint is scoped "No Postgres" — and all 69 fixture proofs passed throughout.
+
+`repo-foundation` has since added a third rung to the test-database ladder
+(`packages/db/src/testing/embedded.ts`): when no container runtime answers, the stock PostgreSQL
+binaries are started in a temp directory on an ephemeral port. Verified on this workstation on
+2026-09-01, with no Docker daemon: all seven previously-failing files now obtain a database. Five
+pass. The two that still fail do so for an unrelated reason — `registerObservationRoutes` throws
+`not implemented`, a deliberate stub belonging to a later API sprint — so no fixture-harness
+obligation is outstanding here.
+
+**The `hostile-modes` execution span was terminalized after the fact.** An EPERM during a ledger
+repair mid-sprint left its `execution-started` event with no `execution-completed`, so `nah trace`
+reported the task as still running and closure recorded "done tasks lack execution timing" as a
+finding. Both endpoints were nevertheless present in this ledger — `started_at` on the
+`execution-started` event, and the `task-finished` event at `2026-09-01T15:06:23.582Z` — so the
+missing row was reconstructed from them rather than estimated: `succeeded`, `duration_ms` 278428.
+The span is derived from recorded evidence, not observed live, which is why it is written down
+here.
 
 No execution handoff yet.
 
