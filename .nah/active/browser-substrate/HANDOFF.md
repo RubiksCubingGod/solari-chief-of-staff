@@ -98,6 +98,82 @@ has no authority for, recorded as a `credential` external gate:
 `tests/ci-workflow.test.ts` are green, and the live suite reports **skipped** in the ordinary run
 rather than failing it - which is the half of the claim this sprint owns.
 
+## Hardening round one (request `hardening-h9780ca3383a960e2`)
+
+Audited consumer-backward across acceptance behaviour, failure paths, composition, testing
+posture, specification adherence and repository pattern usage. Four gaps, two of them medium and
+repaired as tasks in `phase: hardening`, two recorded here as non-blocking.
+
+**Medium, repaired (`harden-live-smoke-teardown`, `08a71a6`) - the teardown promised "both,
+always" and delivered neither.** `runLiveSmoke` ended in `finally { await provider.dispose(); await
+replayClient.close(); }` under a comment stating that both always run. A throwing `dispose()` skips
+`close()`, so the SDK local proxy thread outlives the work and the Node process hangs instead of
+exiting - in CI a twenty-minute timeout wearing the wrong failure's name - and because it throws out
+of the finally it also replaces the body error, the one a reader could have acted on. The same
+package already documents the correct discipline: `withBrowser` preserves the body error and routes
+a failing release to `onReleaseFailure`. Now `runTeardowns` runs every teardown, returns the
+failures rather than throwing them, and the two paths differ deliberately - on failure the body
+error propagates and teardown failures go to a sink, on success a teardown failure is itself the
+finding, because a held slot or a surviving proxy thread is what this smoke exists to notice.
+
+Two smaller defects on the same surface travelled with it. `pollReplayUrl` checked its deadline only
+*between* attempts, so one unanswered `getReplayUrl` could spend the SDK default 90s inside a window
+advertised as 30s; each attempt is now raced against what remains, and the replay client is
+constructed with the poll's own budget rather than the default. And the live suite carried no
+`@live` tag although `live-smoke-path.md` asks for an @live-tagged suite, this sprint's
+`TEST-MATRIX.md` declares the tier, and `packages/agent/src/live-llm.integration.test.ts` already
+spells it that way; the name now carries it.
+
+**Medium, repaired (`harden-vendor-import-boundary`, `fbff019`) - a spec claim nothing enforced.**
+`solari-session-hygiene.md` does not merely observe that one module imports the vendor SDK, it
+claims the boundary: "the import boundary is part of this spec's claim". Nothing checked it.
+`eslint.config.js` restricts the db/drizzle/pg group for the dashboard and nothing else, and no test
+covered the vendor SDK, so the second module to import `@solarisdk/browser` would have done so
+silently. `tests/solari-boundary.test.ts` now mirrors `tests/telegram-boundary.test.ts`, which
+already proves the one-module invariant for grammY. It counts type-only imports too: that exception
+is earned in the Telegram case because a type cannot place a call, and unearned here, because this
+claim is about coupling rather than calls.
+
+The RED was recorded against a real second importer added to the tree and deleted before GREEN, so
+the receipt shows the boundary being enforced rather than a scanner matching nothing - the one way a
+drift proof is worse than no drift proof. Four scanner tests passed in that same RED run.
+
+**Acceptance sharpened, disclosed.** `harden-live-smoke-teardown` was written claiming `vitest -t
+@live` would select the suite. It does not, and cannot: `describe.skipIf` skips the tier before the
+name filter is consulted, so `-t @live` and `-t @notatag` report identically while the tier is off.
+The tag being present in the reported name is the part this task controls and the part the spec
+asks for, and that is what the `done_when` now says. The overstatement was mine and predates
+knowing how vitest orders skip against filter.
+
+**Considered and not a finding - where the replay sharp edges live.** `solari-session-hygiene.md`
+says all Solari sharp edges are encoded once behind the seam, and the 404 replay window and the
+content-encoding ambiguity live in `live-smoke.ts` rather than in `solari.ts`. That reads like a
+violation and is not one: `live-smoke-path.md` is the spec that owns replay retrieval and it places
+the poll and the byte-shape observation here deliberately, and replay is not part of the
+`BrowserProvider` contract - widening the seam for one nightly caller would push a vendor-shaped
+concern into the interface every engine depends on. The boundary that matters, the SDK import, is
+now proven.
+
+**Non-blocking, recorded not repaired.** `reportTeardownFailureToConsole` is a one-line default sink
+and is not behaviourally covered; its direct precedent `reportReleaseFailureToConsole` is not either
+(both are asserted only as export surface). `runLiveSmoke` itself stays live-only by construction,
+so `live-smoke.ts` sits at ~68% statements with the uncovered range being that function.
+
+**Non-blocking, planning metadata.** The project manifest declares
+`repositories[].remote: RubiksCubingGod/chief-of-staff`, but the actual git remote is
+`RubiksCubingGod/solari-chief-of-staff`. Nothing breaks - Actions reads secrets from the repository
+the workflow runs in - and the `SOLARI_API_KEY` secret is confirmed present on the real remote
+(created 2026-09-01T15:49:43Z, verified by `gh secret list`, not taken on a peer's word). It is
+recorded because the sprint PR named in `done_when` goes to the real remote, and a reader following
+the manifest would look in the wrong place.
+
+**Round two.** Re-audited after the repairs on fresh dimensions: regression across the repaired
+surfaces (102 tests, 9 files, green), teardown double-run and timer-leak review of the new
+control flow, and the coverage question above. The live path was re-proven against the real
+gateway after the repair - `node scripts/live-smoke.mjs` passed in 9.5s with the pinned findings
+intact and the process exiting cleanly, which is itself the evidence that `close()` now always
+runs. No critical, high or medium implementation gap remains.
+
 <!-- nah-checkpoint:72457f6ad6cab5e7 -->
 ## 2026-09-01T16:46:26.829Z · claude-code · 51522b6a-8e7b-496e-8bbd-9ba19dc976a1
 
