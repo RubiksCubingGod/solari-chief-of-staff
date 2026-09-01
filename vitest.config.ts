@@ -28,6 +28,13 @@ const sourceAliases = {
   '@chief-of-staff/db/testing': fileURLToPath(
     new URL('./packages/db/src/testing/postgres.ts', import.meta.url),
   ),
+  /**
+   * The fixture sites live outside `packages/`, so they are aliased explicitly
+   * rather than through the workspace-package list below.
+   */
+  '@chief-of-staff/fixtures': fileURLToPath(
+    new URL('./fixtures/src/index.ts', import.meta.url),
+  ),
   ...Object.fromEntries(
     WORKSPACE_PACKAGES.map((name) => [
       `@chief-of-staff/${name}`,
@@ -74,7 +81,11 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'integration',
-          include: ['packages/*/src/**/*.integration.test.ts', 'tests/**/*.integration.test.ts'],
+          include: [
+            'packages/*/src/**/*.integration.test.ts',
+            'tests/**/*.integration.test.ts',
+            'fixtures/src/**/*.integration.test.ts',
+          ],
           exclude: ALWAYS_EXCLUDED,
           testTimeout: 120_000,
           hookTimeout: 120_000,

@@ -1,0 +1,25 @@
+{
+  "name": "@chief-of-staff/fixtures",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Controllable fixture sites the integration tests boot, seed, and assert against.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build"
+  },
+  "dependencies": {
+    "express": "5.2.0"
+  },
+  "devDependencies": {
+    "@types/express": "5.0.6"
+  }
+}

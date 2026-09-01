@@ -1,5 +1,6 @@
 packages:
   - packages/*
+  - fixtures
 minimumReleaseAgeExclude:
   - '@typescript-eslint/eslint-plugin@8.69.0'
   - '@typescript-eslint/parser@8.69.0'
