@@ -128,6 +128,22 @@ describe('the fixtures development entrypoint', () => {
     }
   });
 
+  it('publishes the compose ports on loopback, keeping the control plane unreachable off-host', () => {
+    const compose = parse(readRepositoryFile('docker-compose.yml')) as {
+      services: Record<string, { ports?: string[] }>;
+    };
+    const mappings = compose.services.fixtures?.ports ?? [];
+
+    expect(mappings).toHaveLength(FIXTURE_SITES.length);
+    for (const mapping of mappings) {
+      // `/__test/*` is unauthenticated and mutable. The harness contract's
+      // reason that is acceptable is that an instance is only reachable over
+      // loopback, so a published port that omits the host binding withdraws the
+      // premise rather than merely widening access.
+      expect(mapping, `${mapping} must be published on loopback`).toMatch(/^127\.0\.0\.1:/);
+    }
+  });
+
   it('exposes the entrypoint as the documented pnpm command', () => {
     const manifest = JSON.parse(readRepositoryFile('package.json')) as {
       scripts: Record<string, string>;

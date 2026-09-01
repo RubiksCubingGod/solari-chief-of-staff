@@ -30,16 +30,21 @@ services:
   fixtures:
     image: node:22-alpine
     working_dir: /repo
-    # Bind the wildcard interface so the published ports are reachable from the
-    # host; the tests keep their loopback default.
+    # Bind the wildcard interface *inside* the container so the published ports
+    # are reachable at all; the tests keep their loopback default.
     environment:
       FIXTURES_HOST: 0.0.0.0
     command: ['sh', '-c', 'corepack enable && pnpm install --frozen-lockfile && pnpm fixtures:dev']
+    # Published on loopback deliberately. `/__test/*` is an unauthenticated,
+    # mutable control plane, and the harness contract's reason it needs no
+    # authentication is that an instance is only ever reachable over loopback.
+    # A bare `4301:4301` would publish it on every host interface and take that
+    # reason away.
     ports:
-      - '${FAKESTORE_PORT:-4301}:4301'
-      - '${FAKENEWS_PORT:-4302}:4302'
-      - '${FAKEGYM_PORT:-4303}:4303'
-      - '${FAKEDMV_PORT:-4304}:4304'
+      - '127.0.0.1:${FAKESTORE_PORT:-4301}:4301'
+      - '127.0.0.1:${FAKENEWS_PORT:-4302}:4302'
+      - '127.0.0.1:${FAKEGYM_PORT:-4303}:4303'
+      - '127.0.0.1:${FAKEDMV_PORT:-4304}:4304'
     volumes:
       - .:/repo
 

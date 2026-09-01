@@ -138,6 +138,11 @@ pnpm fixtures:dev            # all four on the ports above
 docker compose up fixtures   # the same four, same factories, in a container
 ```
 
+Both stay on loopback. `/__test/*` is an unauthenticated, mutable control plane, and the only
+reason that is acceptable is that an instance is never reachable off the host — so the compose
+service publishes `127.0.0.1:<port>:<port>` rather than the bare mapping, and
+`dev-entrypoint.integration.test.ts` fails the build if a port loses that binding.
+
 `fixtures/` is deliberately outside the coverage gate (`packages/*/src/**`). Test infrastructure
 earns trust from its own behavioral proofs — isolation, teardown, refusal paths — not from a
 coverage number on code whose only consumer is tests.
