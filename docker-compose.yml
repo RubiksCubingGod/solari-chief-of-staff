@@ -1,0 +1,27 @@
+# Local development Postgres.
+#
+# Integration tests do not use this service: each test gets its own throwaway
+# database (packages/db/src/testing/postgres.ts). This is the database you point
+# the API and worker at while developing.
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: chief_of_staff
+      POSTGRES_PASSWORD: chief_of_staff
+      POSTGRES_DB: chief_of_staff
+    # Parameterised so a workstation already running Postgres on 5432 can move
+    # this one aside instead of failing to start.
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U chief_of_staff -d chief_of_staff']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  postgres-data:

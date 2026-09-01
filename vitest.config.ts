@@ -50,16 +50,12 @@ const ALWAYS_EXCLUDED = ['**/node_modules/**', '**/dist/**', '**/coverage/**'];
 export default defineConfig({
   resolve: { alias: sourceAliases },
   test: {
-    // The integration project legitimately matches nothing until the Postgres
-    // harness lands. An empty run is not a silent hole: the coverage
-    // thresholds below fail the moment tests stop executing.
-    passWithNoTests: true,
     projects: [
       {
         extends: true,
         test: {
           name: 'unit',
-          include: ['packages/*/src/**/*.test.ts'],
+          include: ['packages/*/src/**/*.test.ts', 'tests/**/*.test.ts'],
           exclude: [...ALWAYS_EXCLUDED, '**/*.integration.test.ts'],
         },
       },
@@ -78,7 +74,13 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text-summary', 'lcov'],
       include: ['packages/*/src/**/*.ts'],
-      exclude: TEST_FILE_GLOBS,
+      exclude: [
+        ...TEST_FILE_GLOBS,
+        // The only file that needs a container runtime. It cannot run on a
+        // workstation without Docker, and on CI it is the path every
+        // integration test already takes.
+        'packages/db/src/testing/testcontainers.ts',
+      ],
       thresholds: coverageThresholds,
     },
   },
