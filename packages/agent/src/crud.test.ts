@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { CALLER_HEADER, createHttpCrudClient, type CrudResponse } from './crud.js';
+import { createHttpCrudClient, type CrudResponse } from './crud.js';
 
 /**
  * The parts of the client the integration suite cannot reach through a healthy
@@ -10,6 +10,15 @@ import { CALLER_HEADER, createHttpCrudClient, type CrudResponse } from './crud.j
  */
 
 const BASE = 'http://api.test';
+
+/**
+ * Stands in for whatever a deployment ends up presenting. Its shape does not
+ * matter to these tests; that the client sends exactly what it was handed, and
+ * invents nothing of its own, is the whole point.
+ */
+const TEST_CREDENTIAL = (caller: string): Record<string, string> => ({
+  cookie: `session=${caller}`,
+});
 
 /** The three things `fetch` accepts, each as the URL it means. */
 function urlOf(input: string | URL | Request): string {
@@ -24,6 +33,7 @@ function clientAnswering(answer: (url: string, init?: RequestInit) => Response):
   const seen: { url: string; init?: RequestInit | undefined }[] = [];
   const client = createHttpCrudClient({
     baseUrl: BASE,
+    credential: TEST_CREDENTIAL,
     fetch: (input, init) => {
       const url = urlOf(input);
       seen.push({ url, init });
@@ -41,7 +51,7 @@ function envelope(status: number, body: unknown): Response {
 }
 
 describe('the CRUD client', () => {
-  it('sends the caller as a header and the body as JSON', async () => {
+  it('sends the credential it was given and the body as JSON', async () => {
     const { request, seen } = clientAnswering(() => envelope(201, { id: 'w1' }));
 
     const response = await request('/watches', { url: 'https://shop.test' });
@@ -49,7 +59,7 @@ describe('the CRUD client', () => {
     expect(response).toEqual({ ok: true, status: 201, body: { id: 'w1' } });
     expect(seen[0]?.url).toBe('http://api.test/watches');
     const headers = seen[0]?.init?.headers as Record<string, string>;
-    expect(headers[CALLER_HEADER]).toBe('user-1');
+    expect(headers['cookie']).toBe('session=user-1');
     expect(seen[0]?.init?.body).toBe('{"url":"https://shop.test"}');
   });
 
@@ -59,13 +69,40 @@ describe('the CRUD client', () => {
     await request('/watches');
 
     expect(seen[0]?.init?.body).toBeUndefined();
-    expect(seen[0]?.init?.headers).toEqual({ [CALLER_HEADER]: 'user-1' });
+    expect(seen[0]?.init?.headers).toEqual({ cookie: 'session=user-1' });
+  });
+
+  it('asks the credential for each caller and adds no identity of its own', async () => {
+    // The regression this guards: a client that shipped its own identity header
+    // let anything reaching the API claim to be anyone. One client serves every
+    // chat, so the credential is asked per request rather than once.
+    const asked: string[] = [];
+    const seen: (Record<string, string> | undefined)[] = [];
+    const client = createHttpCrudClient({
+      baseUrl: BASE,
+      credential: (caller) => {
+        asked.push(caller);
+        return { cookie: `session=${caller}` };
+      },
+      fetch: (_input, init) => {
+        seen.push(init?.headers as Record<string, string> | undefined);
+        return Promise.resolve(envelope(200, []));
+      },
+    });
+
+    await client.request('user-1', 'GET', '/watches');
+    await client.request('user-2', 'GET', '/watches');
+
+    expect(asked).toEqual(['user-1', 'user-2']);
+    expect(seen).toEqual([{ cookie: 'session=user-1' }, { cookie: 'session=user-2' }]);
+    for (const headers of seen) expect(headers?.['x-user-id']).toBeUndefined();
   });
 
   it('does not double the slash when the base url has a trailing one', async () => {
     const seen: string[] = [];
     const client = createHttpCrudClient({
       baseUrl: 'http://api.test//',
+      credential: TEST_CREDENTIAL,
       fetch: (input) => {
         seen.push(urlOf(input));
         return Promise.resolve(envelope(200, []));
@@ -131,6 +168,7 @@ describe('the CRUD client', () => {
   it('reports an unreachable server as a refusal rather than throwing at the model', async () => {
     const client = createHttpCrudClient({
       baseUrl: BASE,
+      credential: TEST_CREDENTIAL,
       fetch: () => Promise.reject(new Error('connect ECONNREFUSED')),
     });
 

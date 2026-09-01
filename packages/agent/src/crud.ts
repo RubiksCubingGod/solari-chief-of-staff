@@ -27,15 +27,34 @@ export interface CrudClient {
   request(caller: string, method: CrudMethod, path: string, body?: unknown): Promise<CrudResponse>;
 }
 
+/**
+ * The headers that identify `caller` to the API.
+ *
+ * Identity is supplied to this client rather than invented by it. Until the
+ * `dashboard-read` sprint landed authentication this client wrote its own
+ * `x-user-id` header, which meant anything able to reach the API could claim to
+ * be any user. The API now refuses that header outright.
+ *
+ * What a server-to-server caller should present instead is genuinely undecided.
+ * The magic-link session is a browser credential, and minting one here would
+ * forge exactly what that flow exists to prevent — so this seam names the gap
+ * rather than hiding it behind a default that would be wrong in production.
+ */
+export type CrudCredential = (
+  caller: string,
+) => Record<string, string> | Promise<Record<string, string>>;
+
 export interface HttpCrudClientOptions {
   /** Where the API server is, with no trailing slash required either way. */
   readonly baseUrl: string;
+  /**
+   * Required, and deliberately not defaulted: a client that guessed at identity
+   * is precisely the hole the old header was.
+   */
+  readonly credential: CrudCredential;
   /** Injected only so a test can stand in for the network; production omits it. */
   readonly fetch?: typeof globalThis.fetch;
 }
-
-/** The header the API reads the caller's identity from, until `dashboard-read` lands auth. */
-export const CALLER_HEADER = 'x-user-id';
 
 export function createHttpCrudClient(options: HttpCrudClientOptions): CrudClient {
   const base = options.baseUrl.replace(/\/+$/u, '');
@@ -43,12 +62,15 @@ export function createHttpCrudClient(options: HttpCrudClientOptions): CrudClient
 
   return {
     async request(caller, method, path, body) {
+      // Resolved before the try, so a credential that fails is not reported as
+      // the server being unreachable — which it is not.
+      const identity = await options.credential(caller);
       let response: Response;
       try {
         response = await send(`${base}${path}`, {
           method,
           headers: {
-            [CALLER_HEADER]: caller,
+            ...identity,
             ...(body === undefined ? {} : { 'content-type': 'application/json' }),
           },
           ...(body === undefined ? {} : { body: JSON.stringify(body) }),

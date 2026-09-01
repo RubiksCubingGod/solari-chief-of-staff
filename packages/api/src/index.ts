@@ -1,5 +1,34 @@
 export { createApp } from './app.js';
-export { CALLER_HEADER } from './caller.js';
+export {
+  MailerNotConfiguredError,
+  createMailer,
+  createRecordingMailer,
+  createUnconfiguredMailer,
+  type MagicLinkMail,
+  type MailerPort,
+  type RecordingMailer,
+} from './auth/mailer.js';
+export {
+  DEFAULT_DASHBOARD_BASE_URL,
+  LOGIN_TOKEN_TTL_MS,
+  SESSION_COOKIE_NAME,
+  SESSION_TTL_MS,
+  clearedSessionCookieHeader,
+  loadAuthConfig,
+  mintSessionCookie,
+  readCookie,
+  sessionCookieHeader,
+  signSession,
+  verifySessionToken,
+  type AuthConfig,
+} from './auth/session.js';
+export {
+  consumeLoginToken,
+  digestLoginToken,
+  generateLoginToken,
+  issueLoginToken,
+  type IssuedLoginToken,
+} from './auth/tokens.js';
 export {
   ConfigError,
   LOG_LEVELS,

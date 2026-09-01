@@ -1,4 +1,4 @@
-import { createApp } from '@chief-of-staff/api';
+import { createApp, mintSessionCookie } from '@chief-of-staff/api';
 import { calendarItems, runMigrations, tasks, users, watches } from '@chief-of-staff/db';
 import { startTestPostgres, type TestPostgres } from '@chief-of-staff/db/testing';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -32,6 +32,13 @@ import {
 let postgres: TestPostgres;
 // Taken from the factory rather than imported: Fastify is the API package's
 // dependency, and this package is only ever a client of the server it starts.
+/**
+ * Configured on the server below, so this suite can mint the session a caller
+ * presents. `mintSessionCookie` is a test credential by contract, and it is
+ * legitimate here precisely because this suite owns the secret it signs with.
+ */
+const SESSION_SECRET = 'the-secret-this-suite-configured';
+
 let app: ReturnType<typeof createApp>;
 let crud: CrudClient;
 let ownerId: string;
@@ -53,12 +60,19 @@ async function createUser(): Promise<string> {
 beforeAll(async () => {
   postgres = await startTestPostgres();
   await runMigrations(postgres.connectionString);
-  app = createApp({ DATABASE_URL: postgres.connectionString, LOG_LEVEL: 'silent' });
+  app = createApp({
+    DATABASE_URL: postgres.connectionString,
+    LOG_LEVEL: 'silent',
+    SESSION_SECRET,
+  });
   // On a real socket rather than through `inject`: the tools are an HTTP client,
   // and a proof that skipped the transport would not exercise the one the bot
   // actually ships with.
   const baseUrl = await app.listen({ host: '127.0.0.1', port: 0 });
-  crud = createHttpCrudClient({ baseUrl });
+  crud = createHttpCrudClient({
+    baseUrl,
+    credential: (caller) => ({ cookie: mintSessionCookie(caller, SESSION_SECRET) }),
+  });
   ownerId = await createUser();
   strangerId = await createUser();
 });
@@ -92,7 +106,11 @@ function scripted(...script: readonly ScriptedTurn[]): {
 
 /** What the API says the user has, read back the way the dashboard would. */
 async function listAs(userId: string, path: string): Promise<unknown[]> {
-  const response = await app.inject({ method: 'GET', url: path, headers: { 'x-user-id': userId } });
+  const response = await app.inject({
+    method: 'GET',
+    url: path,
+    headers: { cookie: mintSessionCookie(userId, SESSION_SECRET) },
+  });
   return response.json<unknown[]>();
 }
 

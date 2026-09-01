@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 
+import { registerAuthRoutes } from './auth.js';
 import { registerBindingCodeRoutes } from './binding-codes.js';
 import { registerCalendarItemRoutes } from './calendar-items.js';
 import { registerObservationRoutes } from './observations.js';
@@ -13,6 +14,9 @@ import { registerWatchRoutes } from './watches.js';
  * HTTP surface readable in one file.
  */
 export function registerRoutes(app: FastifyInstance): void {
+  // First, because it is the door every other route below is behind: nothing
+  // here is reachable without the session it issues.
+  registerAuthRoutes(app);
   registerBindingCodeRoutes(app);
   registerWatchRoutes(app);
   registerObservationRoutes(app);

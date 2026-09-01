@@ -13,6 +13,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createApp } from './app.js';
+import { mintSessionCookie } from './auth/session.js';
 
 let postgres: TestPostgres;
 let app: FastifyInstance;
@@ -28,7 +29,11 @@ async function createUser(telegramChatId: string): Promise<string> {
 beforeAll(async () => {
   postgres = await startTestPostgres();
   await runMigrations(postgres.connectionString);
-  app = createApp({ DATABASE_URL: postgres.connectionString, LOG_LEVEL: 'silent' });
+  app = createApp({
+    DATABASE_URL: postgres.connectionString,
+    LOG_LEVEL: 'silent',
+    SESSION_SECRET,
+  });
   await app.ready();
   ownerId = await createUser('owner');
   strangerId = await createUser('stranger');
@@ -50,9 +55,24 @@ beforeEach(async () => {
   await app.db.delete(tasks);
 });
 
-/** The headers of a request from the user every test acts as. */
+/**
+ * The secret this server signs sessions with, fixed so the tests below can mint
+ * one the server will accept. Nothing outside a test may do this: minting a
+ * session without consuming a link is what the magic-link flow exists to
+ * prevent, and it is only available here because this file configured the key.
+ */
+const SESSION_SECRET = 'the-secret-this-suite-configured';
+
+/**
+ * The headers of a request from the user every test acts as.
+ *
+ * This used to be an `x-user-id` header. It is a session cookie now, because a
+ * header naming a user is a header any caller can write - see the note in
+ * `caller.ts`. The seam is the only thing that moved: not one route schema and
+ * not one assertion below it changed.
+ */
 function asOwner(): Record<string, string> {
-  return { 'x-user-id': ownerId };
+  return { cookie: mintSessionCookie(ownerId, SESSION_SECRET) };
 }
 
 const A_WATCH = {
@@ -150,23 +170,32 @@ describe('POST /watches', () => {
     await expect(app.db.select().from(watches)).resolves.toEqual([]);
   });
 
-  it('refuses a caller that does not exist and one that is not an id at all', async () => {
+  it('refuses a session for nobody, a garbage one, and no session at all', async () => {
+    // Signed by this server, for a user who does not exist. The signature is
+    // real and the account is not, and the row is the authority.
     const unknown = await app.inject({
       method: 'POST',
       url: '/watches',
-      headers: { 'x-user-id': randomUUID() },
+      headers: { cookie: mintSessionCookie(randomUUID(), SESSION_SECRET) },
       payload: A_WATCH,
     });
-    expect(unknown.statusCode).toBe(404);
-    expect(code(unknown.body)).toBe('not_found');
+    expect(unknown.statusCode).toBe(401);
+    expect(code(unknown.body)).toBe('unauthorized');
 
+    // Not a session at all. A 401 rather than a 400: a browser holding a stale
+    // cookie has not sent a malformed request, it has simply not signed in.
     const malformed = await app.inject({
       method: 'GET',
       url: '/watches',
-      headers: { 'x-user-id': 'me' },
+      headers: { cookie: 'cos_session=me' },
     });
-    expect(malformed.statusCode).toBe(400);
-    expect(code(malformed.body)).toBe('validation_failed');
+    expect(malformed.statusCode).toBe(401);
+    expect(code(malformed.body)).toBe('unauthorized');
+
+    // And nothing at all, which is what every first visit looks like.
+    const anonymous = await app.inject({ method: 'GET', url: '/watches' });
+    expect(anonymous.statusCode).toBe(401);
+    expect(code(anonymous.body)).toBe('unauthorized');
 
     await expect(app.db.select().from(watches)).resolves.toEqual([]);
   });
@@ -392,14 +421,15 @@ describe('POST /tasks', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/tasks',
-      headers: { 'x-user-id': randomUUID() },
+      headers: { cookie: mintSessionCookie(randomUUID(), SESSION_SECRET) },
       payload: { kind: 'cancel', input: {} },
     });
 
-    expect(response.statusCode).toBe(404);
-    // The refusal has to be the caller check rather than a missing route, which
-    // answers 404 too — naming the header is what tells the two apart.
-    expect(response.json<{ error: { message: string } }>().error.message).toContain('x-user-id');
+    // The refusal has to be the caller check rather than a missing route. It
+    // used to answer 404 for both, and naming the header was the only way to
+    // tell them apart; a session that names nobody is now its own status.
+    expect(response.statusCode).toBe(401);
+    expect(code(response.body)).toBe('unauthorized');
     await expect(app.db.select().from(tasks)).resolves.toEqual([]);
   });
 });

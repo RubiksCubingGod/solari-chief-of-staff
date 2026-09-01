@@ -80,6 +80,7 @@ export const API_ERROR_CODES = [
   'bad_request',
   'malformed_json',
   'validation_failed',
+  'unauthorized',
   'not_found',
   'method_not_allowed',
   'payload_too_large',
@@ -131,9 +132,10 @@ export class ApiUnreachableError extends Error {
 
 /**
  * Everything the API needs in order to know who is asking, expressed as
- * headers. Today the server identifies a caller by an `x-user-id` header; when
- * magic-link auth lands in this same sprint it becomes a session cookie, and
- * this interface is the only thing that has to change - not the call sites.
+ * headers. This used to carry an `x-user-id` header naming the caller; magic
+ * link auth landed in this same sprint and it now carries the session cookie
+ * the browser presented, which is the whole of the change the interface existed
+ * to absorb - no call site moved.
  */
 export interface ApiCredential {
   readonly headers: Readonly<Record<string, string>>;
@@ -145,14 +147,29 @@ export interface ApiCredential {
  */
 export type CredentialSource = () => ApiCredential | Promise<ApiCredential>;
 
-/** The header `packages/api/src/caller.ts` reads the caller's identity from. */
-export const CALLER_HEADER = 'x-user-id';
-
-export function callerIdCredential(userId: string): CredentialSource {
-  return () => ({ headers: { [CALLER_HEADER]: userId } });
+/**
+ * The caller, as `GET /auth/session` describes them. `email` is nullable
+ * because an account can be seeded or bound through Telegram before anyone has
+ * told us where to write to them.
+ */
+export interface AuthenticatedUser {
+  readonly id: string;
+  readonly email: string | null;
 }
 
-/** For the calls that identify nobody, such as the health probe. */
+/**
+ * Forwards the browser's own `Cookie` header, unread.
+ *
+ * The dashboard never parses, verifies or re-signs it - it holds no key and
+ * could not - so the credential is the header verbatim and the API is the only
+ * thing that decides what it is worth. A cookie the dashboard could interpret
+ * would be a cookie the dashboard could forge.
+ */
+export function sessionCookieCredential(cookieHeader: string): CredentialSource {
+  return () => ({ headers: { cookie: cookieHeader } });
+}
+
+/** For the calls that identify nobody: the health probe, and asking for a link. */
 export const anonymousCredential: CredentialSource = () => ({ headers: {} });
 
 /** The slice of `fetch` this client uses, so a test can hand over its own. */
@@ -166,6 +183,13 @@ export interface ApiClientOptions {
 
 export interface ApiClient {
   health(): Promise<HealthReport>;
+  /** Who the credential speaks for. Refused with 401 when it speaks for nobody. */
+  session(): Promise<AuthenticatedUser>;
+  /**
+   * Asks for a magic link. Answers the same way whether or not the address has
+   * an account, so there is nothing here for a caller to branch on.
+   */
+  requestLink(email: string): Promise<void>;
   listWatches(): Promise<readonly Watch[]>;
   setWatchStatus(id: string, status: WatchStatus): Promise<Watch>;
   listCalendarItems(): Promise<readonly CalendarItem[]>;
@@ -194,7 +218,11 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
   const credential = options.credential ?? anonymousCredential;
   const send = options.fetch ?? ((input, init) => fetch(input, init));
 
-  async function request<T>(method: 'GET' | 'PATCH', path: string, body?: unknown): Promise<T> {
+  async function request<T>(
+    method: 'GET' | 'POST' | 'PATCH',
+    path: string,
+    body?: unknown,
+  ): Promise<T> {
     const url = `${baseUrl}${path}`;
     const { headers } = await credential();
     let response: Response;
@@ -229,6 +257,10 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 
   return {
     health: () => request<HealthReport>('GET', '/health'),
+    session: () => request<AuthenticatedUser>('GET', '/auth/session'),
+    requestLink: async (email) => {
+      await request<unknown>('POST', '/auth/request-link', { email });
+    },
     listWatches: () => request<readonly Watch[]>('GET', '/watches'),
     setWatchStatus: (id, status) =>
       request<Watch>('PATCH', `/watches/${encodeURIComponent(id)}`, { status }),

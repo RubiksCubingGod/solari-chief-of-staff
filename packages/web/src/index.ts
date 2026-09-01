@@ -16,17 +16,17 @@ export {
   API_ERROR_CODES,
   ApiError,
   ApiUnreachableError,
-  CALLER_HEADER,
   UNKNOWN_ERROR_CODE,
   anonymousCredential,
-  callerIdCredential,
   createApiClient,
   isApiErrorCode,
+  sessionCookieCredential,
   type ApiClient,
   type ApiClientOptions,
   type ApiCredential,
   type ApiErrorCode,
   type ApiErrorDetail,
+  type AuthenticatedUser,
   type CalendarItem,
   type CredentialSource,
   type FetchLike,
@@ -34,3 +34,10 @@ export {
   type Task,
   type Watch,
 } from './api-client';
+
+export {
+  REQUEST_LINK_PATH,
+  SESSION_COOKIE_NAME,
+  readSession,
+  type Session,
+} from './auth/session';

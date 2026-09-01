@@ -6,7 +6,7 @@ import {
   type ChatAgent,
   type CrudClient,
 } from '@chief-of-staff/agent';
-import { createApp } from '@chief-of-staff/api';
+import { createApp, mintSessionCookie } from '@chief-of-staff/api';
 import {
   ANSWER_RECORDED,
   BINDING_CONFIRMED,
@@ -70,6 +70,13 @@ import {
 let postgres: TestPostgres;
 // Taken from the factory rather than imported: Fastify belongs to the API
 // package, and everything here is a client of the server it starts.
+/**
+ * Configured on the server below, so this suite can mint the session a caller
+ * presents. `mintSessionCookie` is a test credential by contract, and it is
+ * legitimate here precisely because this suite owns the secret it signs with.
+ */
+const SESSION_SECRET = 'the-secret-this-suite-configured';
+
 let app: ReturnType<typeof createApp>;
 let crud: CrudClient;
 
@@ -88,12 +95,19 @@ const A_WATCH = {
 beforeAll(async () => {
   postgres = await startTestPostgres();
   await runMigrations(postgres.connectionString);
-  app = createApp({ DATABASE_URL: postgres.connectionString, LOG_LEVEL: 'silent' });
+  app = createApp({
+    DATABASE_URL: postgres.connectionString,
+    LOG_LEVEL: 'silent',
+    SESSION_SECRET,
+  });
   // On a real socket rather than through `inject`: the chat tools are an HTTP
   // client, and a composition that skipped the transport would not be the one
   // that ships.
   const baseUrl = await app.listen({ host: '127.0.0.1', port: 0 });
-  crud = createHttpCrudClient({ baseUrl });
+  crud = createHttpCrudClient({
+    baseUrl,
+    credential: (caller) => ({ cookie: mintSessionCookie(caller, SESSION_SECRET) }),
+  });
 });
 
 afterAll(async () => {

@@ -20,6 +20,11 @@ export const ERROR_CODES = [
   'bad_request',
   'malformed_json',
   'validation_failed',
+  // A request that named nobody the server believes. Distinct from
+  // `not_found`, which is what a caller who *is* somebody is told about a row
+  // that is not theirs: the two answer different questions and a client that
+  // conflated them would offer a login to somebody who is already logged in.
+  'unauthorized',
   'not_found',
   'method_not_allowed',
   'payload_too_large',

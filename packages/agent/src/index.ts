@@ -21,9 +21,9 @@ export {
   type ChatTurnOutcome,
 } from './chat-agent.js';
 export {
-  CALLER_HEADER,
   createHttpCrudClient,
   type CrudClient,
+  type CrudCredential,
   type CrudMethod,
   type CrudResponse,
   type HttpCrudClientOptions,

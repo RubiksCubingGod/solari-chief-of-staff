@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  CALLER_HEADER,
+  SESSION_COOKIE_NAME,
   ERROR_CODES,
   HttpError,
   createApp,
   declaredErrorCode,
+  mintSessionCookie,
+  verifySessionToken,
   errorEnvelope,
   isCronExpression,
   loadConfig,
@@ -42,7 +44,19 @@ describe('@chief-of-staff/api', () => {
   });
 
   it('exposes what a client of this server has to agree with it about', () => {
-    expect(CALLER_HEADER).toBe('x-user-id');
+    // The cookie name, because a dashboard that guessed it would guard nothing,
+    // and the minting helper, because every package whose integration suite
+    // drives a real server needs one line to act as somebody.
+    expect(SESSION_COOKIE_NAME).toBe('cos_session');
+    const cookie = mintSessionCookie('a5f2f3c8-0b3c-4a0e-9f1e-6a7c0b9d2e11', 'a-test-secret');
+    expect(cookie.startsWith(`${SESSION_COOKIE_NAME}=`)).toBe(true);
+    expect(
+      verifySessionToken(cookie.slice(SESSION_COOKIE_NAME.length + 1), 'a-test-secret'),
+    ).toBe('a5f2f3c8-0b3c-4a0e-9f1e-6a7c0b9d2e11');
+    // Signed with one secret, worthless under another.
+    expect(
+      verifySessionToken(cookie.slice(SESSION_COOKIE_NAME.length + 1), 'another-secret'),
+    ).toBeUndefined();
     expect(isCronExpression('0 * * * *')).toBe(true);
   });
 

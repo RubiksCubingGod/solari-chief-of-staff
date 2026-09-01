@@ -60,7 +60,13 @@ export const users = pgTable('users', {
   // permits many nulls in a unique index but only one of any given chat id,
   // which is what makes one chat bind to at most one user.
   telegramChatId: text('telegram_chat_id').unique(),
-  email: text('email'),
+  // Null until an address is known, for the same reason as the chat id above: a
+  // user is seeded or invited before anyone has told us where to write to them.
+  // Unique for the same reason too — Postgres permits many nulls in a unique
+  // index but only one of any given address, and that is exactly the behaviour
+  // magic-link auth needs: `POST /auth/request-link` resolves an address to at
+  // most one account, so a link can never be issued into an ambiguity.
+  email: text('email').unique(),
   tz: text('tz').notNull().default('UTC'),
   createdAt: timestampColumn('created_at').notNull().defaultNow(),
 });
@@ -233,6 +239,42 @@ export const bindingCodes = pgTable(
 );
 
 /**
+ * One magic link, from the moment it is issued to the moment it is spent.
+ *
+ * Deliberately shaped like `bindingCodes` above, because it is the same problem
+ * one channel over: a single-use credential that has to survive a restart and
+ * be revocable by deleting a row. The one difference is what is stored.
+ *
+ * `bindingCodes` stores the code itself — it is six characters a person reads
+ * off a screen and types, and it is worthless without also knowing the chat to
+ * type it into. A magic-link token is the whole credential: anything holding it
+ * is that user. So only a one-way digest of it is stored, and the token itself
+ * exists nowhere but in the link that was mailed. A database that leaks cannot
+ * be used to mint a working link, and a tampered token simply digests to
+ * something no row carries.
+ */
+export const loginTokens = pgTable(
+  'login_tokens',
+  {
+    id: primaryKeyColumn(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    // Unique so two links can never digest to the same row, which would make
+    // consumption ambiguous at exactly the moment it must not be.
+    tokenDigest: text('token_digest').notNull().unique(),
+    expiresAt: timestampColumn('expires_at').notNull(),
+    // Set when the link is followed, and the whole of single use: a token is
+    // spent, not deleted, so a second visit can be told apart from a link that
+    // never existed. Consumption is one UPDATE that filters on this being null,
+    // so two concurrent visits race in the database and exactly one wins.
+    consumedAt: timestampColumn('consumed_at'),
+    createdAt: timestampColumn('created_at').notNull().defaultNow(),
+  },
+  (table) => [index('login_tokens_user_id_idx').on(table.userId)],
+);
+
+/**
  * One attempt to put a message in a user's chat, and what became of it.
  *
  * Deliberately not the same row as the transcript. `messages` is what the user
@@ -277,6 +319,7 @@ export const SCHEMA_TABLE_NAMES = [
   'calendar_items',
   'messages',
   'binding_codes',
+  'login_tokens',
   'deliveries',
 ] as const;
 
@@ -298,5 +341,7 @@ export type Message = typeof messages.$inferSelect;
 export type NewMessage = typeof messages.$inferInsert;
 export type BindingCode = typeof bindingCodes.$inferSelect;
 export type NewBindingCode = typeof bindingCodes.$inferInsert;
+export type LoginToken = typeof loginTokens.$inferSelect;
+export type NewLoginToken = typeof loginTokens.$inferInsert;
 export type Delivery = typeof deliveries.$inferSelect;
 export type NewDelivery = typeof deliveries.$inferInsert;

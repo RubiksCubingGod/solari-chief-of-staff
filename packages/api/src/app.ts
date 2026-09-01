@@ -1,6 +1,8 @@
 import { createDatabase, type Database } from '@chief-of-staff/db';
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 
+import { createMailer, type MailerPort } from './auth/mailer.js';
+import { loadAuthConfig, type AuthConfig } from './auth/session.js';
 import { loadConfig, type AppConfig } from './config.js';
 import { declaredErrorCode, errorEnvelope, violationDetails, type ErrorCode } from './errors.js';
 import { AJV_FORMATS } from './formats.js';
@@ -9,7 +11,9 @@ import { registerRoutes } from './routes/index.js';
 declare module 'fastify' {
   interface FastifyInstance {
     readonly config: AppConfig;
+    readonly auth: AuthConfig;
     readonly db: Database['db'];
+    readonly mailer: MailerPort;
   }
   interface FastifyRequest {
     userId: string;
@@ -22,6 +26,7 @@ declare module 'fastify' {
  */
 const CODE_BY_STATUS: Readonly<Record<number, ErrorCode>> = {
   400: 'malformed_json',
+  401: 'unauthorized',
   404: 'not_found',
   405: 'method_not_allowed',
   413: 'payload_too_large',
@@ -46,7 +51,11 @@ export function createApp(environment: NodeJS.ProcessEnv = process.env): Fastify
   });
 
   app.decorate('config', config);
+  app.decorate('auth', loadAuthConfig(environment, config));
   app.decorate('db', database.db);
+  // Recording everywhere but production, where no vendor is chosen yet and the
+  // absence has to be loud. See `auth/mailer.ts`.
+  app.decorate('mailer', createMailer(config.runtimeEnvironment));
   // The identity a route works on behalf of, filled in per request by
   // `resolveCaller`. Declared here because Fastify 5 will not accept a property
   // that was not declared on the request prototype.

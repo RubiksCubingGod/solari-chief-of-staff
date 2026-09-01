@@ -41,17 +41,27 @@ interface StubApi extends Stoppable {
   readonly requestedPaths: readonly string[];
 }
 
+/** The signed-in account the stub API vouches for. */
+const STUB_USER = { id: '11111111-1111-4111-8111-111111111111', email: 'owner@example.test' };
+
+/** What a browser holding a session presents. The stub never inspects it. */
+const SESSION_COOKIE = 'cos_session=whatever-the-stub-vouches-for';
+
 /**
  * Stands in for the Fastify server. The shell only needs to prove it can reach
  * the API and read a response; making that a real API would drag a database
- * into a test about whether a page renders.
+ * into a test about whether a page renders. It answers `/auth/session` because
+ * every page is behind the guard now, and the guard is one HTTP call - which is
+ * exactly the shape a stub can stand in for. Whether the guard is *right* is
+ * `auth-guard.integration.test.ts`, against a real API.
  */
 async function startStubApi(): Promise<StubApi> {
   const requestedPaths: string[] = [];
   const server = createServer((request, response) => {
-    requestedPaths.push(request.url ?? '');
+    const path = request.url ?? '';
+    requestedPaths.push(path);
     response.writeHead(200, { 'content-type': 'application/json' });
-    response.end(JSON.stringify({ status: 'ok' }));
+    response.end(JSON.stringify(path === '/auth/session' ? STUB_USER : { status: 'ok' }));
   });
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
@@ -80,7 +90,7 @@ describe('the dashboard shell', () => {
       const api = await track(await startStubApi());
       const web = await track(await startWebDevServer({ apiBaseUrl: api.url }));
 
-      const response = await fetch(`${web.url}/`);
+      const response = await fetch(`${web.url}/`, { headers: { cookie: SESSION_COOKIE } });
       expect(response.status).toBe(200);
       const html = await response.text();
 
@@ -96,15 +106,21 @@ describe('the dashboard shell', () => {
       expect(html).toContain('Overview');
       expect(html).toContain(api.url);
       // It reached the API over HTTP rather than reporting reachability it
-      // never checked.
+      // never checked - and it asked the API who was asking rather than
+      // deciding that for itself.
       expect(api.requestedPaths).toContain('/health');
+      expect(api.requestedPaths).toContain('/auth/session');
       expect(html).toContain('reachable');
+      // React marks the join between a literal and an interpolated value with
+      // an empty comment so it can find the boundary again when it hydrates.
+      // A reader sees one sentence, so the assertion is made against one.
+      expect(html.replaceAll('<!-- -->', '')).toContain(`Signed in as ${STUB_USER.email}`);
 
       // Teardown is a property of the handle, not of this file remembering to
       // do it: stopping twice is harmless and the port is genuinely released.
       await web.stop();
       await web.stop();
-      await expect(fetch(`${web.url}/`)).rejects.toThrow();
+      await expect(fetch(`${web.url}/`, { headers: { cookie: SESSION_COOKIE } })).rejects.toThrow();
     },
     240_000,
   );

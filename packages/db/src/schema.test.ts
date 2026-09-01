@@ -7,6 +7,7 @@ import {
   bindingCodes,
   calendarItems,
   deliveries,
+  loginTokens,
   messages,
   observations,
   siteConnections,
@@ -26,6 +27,7 @@ const TABLES: PgTable[] = [
   calendarItems,
   messages,
   bindingCodes,
+  loginTokens,
   deliveries,
 ];
 
@@ -80,6 +82,7 @@ describe('the section 5 schema', () => {
       calendarItems,
       messages,
       bindingCodes,
+      loginTokens,
       deliveries,
     ]) {
       expect(foreignKeys(table)).toContainEqual({
@@ -135,6 +138,9 @@ describe('the section 5 schema', () => {
     });
     expect(indexedColumns(deliveries)).toEqual({
       deliveries_user_id_created_at_idx: ['user_id', 'created_at'],
+    });
+    expect(indexedColumns(loginTokens)).toEqual({
+      login_tokens_user_id_idx: ['user_id'],
     });
   });
 
@@ -196,6 +202,41 @@ describe('the section 5 schema', () => {
     // The address at the time of sending, not a join to wherever the user lives
     // now: a rebind must not make an old delivery read as having gone there.
     expect(columns['chat_id']?.notNull).toBe(true);
+  });
+
+  it('addresses a user by an email nobody else can also hold', () => {
+    const columns = Object.fromEntries(
+      getTableConfig(users).columns.map((column) => [column.name, column]),
+    );
+
+    // A seeded user exists before anyone has said where to write to them, so
+    // the address cannot be required. It still has to resolve to one account:
+    // `POST /auth/request-link` turns an address into the user a link is minted
+    // for, and two rows sharing one address would make that question ambiguous
+    // at the moment it must not be. Postgres permits many nulls in a unique
+    // index, so the two properties do not conflict.
+    expect(columns['email']?.notNull).toBe(false);
+    expect(columns['email']?.isUnique).toBe(true);
+  });
+
+  it('stores a magic link as a digest and spends it rather than deleting it', () => {
+    const columns = Object.fromEntries(
+      getTableConfig(loginTokens).columns.map((column) => [column.name, column]),
+    );
+
+    // The token itself is never stored: it is the whole credential, so a
+    // database that leaked would otherwise be a database that can mint working
+    // links. Only its one-way digest is here, which is also what makes a
+    // tampered token refusable — it simply digests to something no row carries.
+    expect(columns['token']).toBeUndefined();
+    expect(columns['token_digest']?.notNull).toBe(true);
+    expect(columns['token_digest']?.isUnique).toBe(true);
+    // Nullable, and the whole of single use: a spent token is still there, so a
+    // second visit is answered differently from a link that never existed, and
+    // one UPDATE filtering on it being null is what makes a race have one
+    // winner.
+    expect(columns['consumed_at']?.notNull).toBe(false);
+    expect(columns['expires_at']?.notNull).toBe(true);
   });
 
   it('allows one stored login per site per user', () => {

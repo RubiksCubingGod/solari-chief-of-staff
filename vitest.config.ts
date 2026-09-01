@@ -29,6 +29,18 @@ const sourceAliases = {
     new URL('./packages/db/src/testing/postgres.ts', import.meta.url),
   ),
   /**
+   * The dashboard's guard test drives a browser through the whole magic-link
+   * flow, so it needs a real API on a real database - and it may not build one,
+   * because `eslint.config.js` keeps `packages/web` away from the schema. The
+   * API package builds the fixture instead and hands over a URL. Source-only
+   * and excluded from that package's build, so like the db helper above it is
+   * aliased explicitly and listed before the bare package alias, which would
+   * otherwise swallow the subpath.
+   */
+  '@chief-of-staff/api/testing': fileURLToPath(
+    new URL('./packages/api/src/testing/auth-stack.ts', import.meta.url),
+  ),
+  /**
    * The fixture sites live outside `packages/`, so they are aliased explicitly
    * rather than through the workspace-package list below.
    */

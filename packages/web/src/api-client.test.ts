@@ -4,14 +4,16 @@ import {
   API_ERROR_CODES,
   ApiError,
   ApiUnreachableError,
-  CALLER_HEADER,
   UNKNOWN_ERROR_CODE,
   anonymousCredential,
-  callerIdCredential,
   createApiClient,
   isApiErrorCode,
+  sessionCookieCredential,
   type FetchLike,
 } from './api-client';
+
+/** The cookie the API issues, as a browser would present it. */
+const SESSION = 'cos_session=signed.value';
 
 const BASE_URL = 'https://api.example.com';
 
@@ -73,7 +75,7 @@ describe('createApiClient', () => {
       fetch: stub.fetch,
       credential: () => {
         issued += 1;
-        return { headers: { [CALLER_HEADER]: `user-${String(issued)}` } };
+        return { headers: { cookie: `cos_session=session-${String(issued)}` } };
       },
     });
 
@@ -81,8 +83,8 @@ describe('createApiClient', () => {
     await client.listTasks();
 
     expect(issued).toBe(2);
-    expect(stub.calls[0]?.headers[CALLER_HEADER]).toBe('user-1');
-    expect(stub.calls[1]?.headers[CALLER_HEADER]).toBe('user-2');
+    expect(stub.calls[0]?.headers['cookie']).toBe('cos_session=session-1');
+    expect(stub.calls[1]?.headers['cookie']).toBe('cos_session=session-2');
     expect(stub.calls.map((call) => call.url)).toEqual([
       `${BASE_URL}/calendar-items`,
       `${BASE_URL}/tasks`,
@@ -107,7 +109,7 @@ describe('createApiClient', () => {
     const client = createApiClient({
       baseUrl: BASE_URL,
       fetch: stub.fetch,
-      credential: callerIdCredential('user-1'),
+      credential: sessionCookieCredential(SESSION),
     });
 
     const updated = await client.setWatchStatus('a/b', 'paused');
@@ -188,8 +190,54 @@ describe('createApiClient', () => {
     const client = createApiClient({ baseUrl: BASE_URL, fetch: stub.fetch });
 
     expect(await client.health()).toEqual({ status: 'ok' });
-    expect(stub.calls[0]?.headers[CALLER_HEADER]).toBeUndefined();
+    expect(stub.calls[0]?.headers['cookie']).toBeUndefined();
     expect(anonymousCredential()).toEqual({ headers: {} });
+  });
+
+  it('forwards the browser cookie verbatim rather than interpreting it', async () => {
+    const stub = stubFetch(() => json({ id: 'user-1', email: 'owner@example.test' }));
+    const client = createApiClient({
+      baseUrl: BASE_URL,
+      fetch: stub.fetch,
+      credential: sessionCookieCredential(`${SESSION}; other=kept`),
+    });
+
+    const user = await client.session();
+
+    expect(user).toEqual({ id: 'user-1', email: 'owner@example.test' });
+    expect(stub.calls[0]?.url).toBe(`${BASE_URL}/auth/session`);
+    // Verbatim: the dashboard holds no key and so has no business rewriting a
+    // credential it cannot verify. Dropping the unrelated cookie would also be
+    // a decision the API is the one entitled to make.
+    expect(stub.calls[0]?.headers['cookie']).toBe(`${SESSION}; other=kept`);
+    expect(sessionCookieCredential(SESSION)()).toEqual({ headers: { cookie: SESSION } });
+  });
+
+  it('surfaces an unauthenticated session as a 401 refusal rather than an empty user', async () => {
+    const stub = stubFetch(() =>
+      json({ error: { code: 'unauthorized', message: 'no session' } }, 401),
+    );
+    const client = createApiClient({ baseUrl: BASE_URL, fetch: stub.fetch });
+
+    const error: unknown = await client.session().catch((reason: unknown) => reason);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(401);
+    expect((error as ApiError).code).toBe('unauthorized');
+    expect(isApiErrorCode('unauthorized')).toBe(true);
+  });
+
+  it('asks for a magic link without a credential and reads nothing back', async () => {
+    const stub = stubFetch(() => json({ status: 'accepted' }, 202));
+    const client = createApiClient({ baseUrl: BASE_URL, fetch: stub.fetch });
+
+    await expect(client.requestLink('owner@example.test')).resolves.toBeUndefined();
+
+    expect(stub.calls[0]?.url).toBe(`${BASE_URL}/auth/request-link`);
+    expect(stub.calls[0]?.method).toBe('POST');
+    expect(stub.calls[0]?.body).toBe('{"email":"owner@example.test"}');
+    // Nobody is signed in yet, so nothing is presented.
+    expect(stub.calls[0]?.headers['cookie']).toBeUndefined();
   });
 
   it('reaches the real global fetch when it is handed no other one', async () => {
