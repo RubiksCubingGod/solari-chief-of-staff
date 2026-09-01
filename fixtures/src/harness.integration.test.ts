@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   assertNoLeakedFixtures,
+  type FixtureHandle,
   liveFixtureCount,
+  type ProbeControl,
   startProbeFixture,
 } from './index.js';
 
@@ -60,6 +62,32 @@ describe('fixture harness', () => {
     await fixture.stop();
 
     await expect(fixture.control.value()).rejects.toThrow(/stopped/i);
+  });
+
+  it('registers nothing when a start fails, and tolerates teardown afterwards', async () => {
+    const holder = await startProbeFixture();
+    const port = Number(new URL(holder.url).port);
+
+    // Colliding on a bound port is the cheapest real start failure.
+    let failed: FixtureHandle<ProbeControl> | undefined;
+    await expect(
+      startProbeFixture({ port }).then((handle) => {
+        failed = handle;
+        return handle;
+      }),
+    ).rejects.toThrow(/EADDRINUSE/);
+
+    // The substantive claim: a start that threw left no registration behind, so
+    // it cannot make an unrelated later test fail the leak assert. Only the
+    // instance this test deliberately holds is live.
+    expect(liveFixtureCount()).toBe(1);
+
+    // And the teardown a caller would actually write after a failed start -
+    // there is no handle to stop - resolves rather than throwing.
+    await expect(Promise.resolve(failed?.stop())).resolves.toBeUndefined();
+
+    await holder.stop();
+    expect(liveFixtureCount()).toBe(0);
   });
 
   it('fails the run when an instance is left running', async () => {
