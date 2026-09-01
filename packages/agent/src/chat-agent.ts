@@ -138,7 +138,9 @@ export function createChatAgent(options: ChatAgentOptions): ChatAgent {
         // changed nothing; an outage after a tool call left the change in
         // place, and the two cannot honestly be told the same thing.
         return {
-          reply: toolkit.calls.length === 0 ? LLM_UNAVAILABLE : LLM_UNAVAILABLE_MIDWAY,
+          // On effects, not attempts: the record holds refused calls too, and
+          // a call the API turned down changed nothing to warn anybody about.
+          reply: toolkit.calls.some((call) => call.ok) ? LLM_UNAVAILABLE_MIDWAY : LLM_UNAVAILABLE,
           outcome: 'unavailable',
           toolCalls: toolkit.calls,
         };

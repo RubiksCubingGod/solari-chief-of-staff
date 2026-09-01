@@ -328,4 +328,29 @@ describe('a refusal that came from somewhere else', () => {
     expect(turn.toolCalls.map((call) => call.name)).toEqual(['create_watch']);
     expect(await listAs(ownerId, '/watches')).toHaveLength(1);
   });
+
+  it('does not warn about effects when the only call it made was refused', async () => {
+    const { agent } = scripted(
+      useTool('create_watch', {
+        kind: 'price',
+        url: 'shop.test/item/1',
+        schedule: 'every other friday',
+        condition: { drops_below: 2000 },
+      }),
+      outage(),
+    );
+
+    const turn = await agent.respond({ userId: ownerId, text: 'watch shop.test/item/1 weekly' });
+
+    expect(turn.outcome).toBe('unavailable');
+    // A call the API refused is an attempt, not an effect, and the record
+    // keeps both. Warning this user that something may already have happened
+    // sends them looking for a watch that was never created — the mirror of
+    // the mistake above, and the same cost: a warning nobody can act on is one
+    // they learn to ignore, including the time it is real.
+    expect(turn.toolCalls.map((call) => call.ok)).toEqual([false]);
+    expect(turn.reply).toBe(LLM_UNAVAILABLE);
+    expect(turn.reply).not.toBe(LLM_UNAVAILABLE_MIDWAY);
+    expect(await listAs(ownerId, '/watches')).toEqual([]);
+  });
 });
