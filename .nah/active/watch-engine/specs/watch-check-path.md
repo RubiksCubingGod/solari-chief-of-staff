@@ -14,7 +14,7 @@ origin:
     extraction, comparison, observation persistence, and trigger emission - proven end to end
     against controlled fixture state.
   refs: [.nah/active/watch-engine/README.md,
-    .nah/active/repo-foundation/specs/job-scheduling-harness.md]
+    .nah/done/2026-09-01/repo-foundation/specs/job-scheduling-harness.md]
 ---
 
 # Watch check path

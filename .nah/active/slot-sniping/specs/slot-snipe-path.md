@@ -16,7 +16,7 @@ origin:
   refs: [.nah/active/slot-sniping/README.md,
     .nah/active/watch-engine/specs/watch-check-path.md,
     .nah/active/action-playbooks/specs/cancellation-playbook-path.md,
-    .nah/active/fixture-harness/specs/transaction-target-path.md]
+    .nah/active/fixture-harness/specs/contested-booking-path.md]
 ---
 
 # Slot snipe path

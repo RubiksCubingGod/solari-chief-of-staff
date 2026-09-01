@@ -15,7 +15,7 @@ origin:
     retention detour, and the confirmation-code gate that only a real UserIO answer can pass,
     to a cancelled fixture state with a full audit trail.
   refs: [.nah/active/action-playbooks/README.md,
-    .nah/active/fixture-harness/specs/transaction-target-path.md]
+    .nah/active/fixture-harness/specs/assisted-cancellation-path.md]
 ---
 
 # Cancellation playbook path
