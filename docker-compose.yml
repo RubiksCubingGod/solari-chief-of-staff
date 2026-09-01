@@ -23,5 +23,25 @@ services:
       timeout: 5s
       retries: 20
 
+  # The fixture sites, for poking at by hand. Integration tests do not use this
+  # service either: each test file boots its own private in-process instances on
+  # ephemeral ports. This runs the same `start*Fixture()` factories through the
+  # same registry, so there is one boot path and several entry points.
+  fixtures:
+    image: node:22-alpine
+    working_dir: /repo
+    # Bind the wildcard interface so the published ports are reachable from the
+    # host; the tests keep their loopback default.
+    environment:
+      FIXTURES_HOST: 0.0.0.0
+    command: ['sh', '-c', 'corepack enable && pnpm install --frozen-lockfile && pnpm fixtures:dev']
+    ports:
+      - '${FAKESTORE_PORT:-4301}:4301'
+      - '${FAKENEWS_PORT:-4302}:4302'
+      - '${FAKEGYM_PORT:-4303}:4303'
+      - '${FAKEDMV_PORT:-4304}:4304'
+    volumes:
+      - .:/repo
+
 volumes:
   postgres-data:

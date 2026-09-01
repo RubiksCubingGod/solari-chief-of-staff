@@ -60,3 +60,10 @@ export {
   type PageContent,
 } from './pages.js';
 export { type ProbeControl, startProbeFixture } from './probe.js';
+export { FIXTURE_SITES, type FixtureSite } from './registry.js';
+export {
+  type ServedFixture,
+  type ServedFixtures,
+  startAllFixtures,
+  type StartAllOptions,
+} from './serve.js';

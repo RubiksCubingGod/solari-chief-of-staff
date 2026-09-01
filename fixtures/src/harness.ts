@@ -16,11 +16,6 @@ export class FixtureStoppedError extends Error {
 }
 
 /**
- * Issues one control-plane request against the instance that produced it.
- * Every fixture's typed control client is built on top of this, so the
- * stopped-instance guard exists in exactly one place.
- */
-/**
  * Reads a parsed JSON request body as a plain record so a control-plane route
  * can validate named fields without reaching through `any`. A non-object body
  * becomes an empty record, which every validator then rejects by field.
@@ -29,6 +24,11 @@ export function readRecord(body: unknown): Record<string, unknown> {
   return typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
 }
 
+/**
+ * Issues one control-plane request against the instance that produced it.
+ * Every fixture's typed control client is built on top of this, so the
+ * stopped-instance guard exists in exactly one place.
+ */
 export type ControlRequest = <TResult>(
   method: 'GET' | 'POST' | 'DELETE',
   path: string,
@@ -42,6 +42,12 @@ export interface FixtureHandle<TControl> {
   readonly name: string;
   readonly url: string;
   readonly control: TControl;
+  /**
+   * The routes this instance actually serves, read off the mounted app rather
+   * than from a hand-kept list, so documentation can be checked against the
+   * running fixture instead of against another list that drifts with it.
+   */
+  readonly routes: readonly string[];
   stop(): Promise<void>;
 }
 
@@ -52,6 +58,12 @@ export interface StartFixtureOptions {
    * concurrent test files cannot collide.
    */
   readonly port?: number;
+  /**
+   * Interface to bind. Tests take the default loopback; only the development
+   * entrypoint overrides it, so a fixture in a container is reachable from the
+   * host without changing how the tests boot.
+   */
+  readonly host?: string;
 }
 
 const live = new Map<object, string>();
@@ -97,10 +109,13 @@ export async function startFixture<TControl>(
   mount(app);
 
   const server = createServer(app);
-  await listen(server, options.port ?? 0);
+  const host = options.host ?? '127.0.0.1';
+  await listen(server, options.port ?? 0, host);
 
   const { port } = server.address() as AddressInfo;
-  const url = `http://127.0.0.1:${port}`;
+  // A wildcard bind is not an address a client can dial, so the advertised URL
+  // stays loopback.
+  const url = `http://${host === '0.0.0.0' ? '127.0.0.1' : host}:${port}`;
   const token = {};
   live.set(token, name);
 
@@ -131,6 +146,7 @@ export async function startFixture<TControl>(
   return {
     name,
     url,
+    routes: describeRoutes(app),
     control: buildControl(request),
     stop: async () => {
       if (stopped) {
@@ -148,12 +164,39 @@ export async function startFixture<TControl>(
   };
 }
 
-function listen(server: Server, port: number): Promise<void> {
+function listen(server: Server, port: number, host: string): Promise<void> {
   return new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(port, '127.0.0.1', () => {
+    server.listen(port, host, () => {
       server.removeListener('error', reject);
       resolve();
     });
   });
+}
+
+interface RouteLayer {
+  readonly route?: { readonly path?: unknown; readonly methods?: Record<string, boolean> };
+}
+
+/**
+ * Enumerates the routes an app has mounted. Express does not expose this as
+ * public API, so the shape is narrowed defensively: a stack that does not look
+ * the way we expect yields no routes, and the cross-check test fails loudly
+ * rather than silently agreeing with an empty list.
+ */
+function describeRoutes(app: Express): string[] {
+  const { stack } = app.router as unknown as { stack?: RouteLayer[] };
+  const routes = new Set<string>();
+  for (const layer of stack ?? []) {
+    const route = layer.route;
+    if (route === undefined || typeof route.path !== 'string') {
+      continue;
+    }
+    for (const [method, enabled] of Object.entries(route.methods ?? {})) {
+      if (enabled) {
+        routes.add(`${method.toUpperCase()} ${route.path}`);
+      }
+    }
+  }
+  return [...routes].sort();
 }
