@@ -51,7 +51,7 @@ project_management:
   provider: unconfigured
   writes_enabled: false
   source:
-    repository_url: https://example.invalid/chief-of-staff
+    repository_url: https://github.com/RubiksCubingGod/solari-chief-of-staff
     branch: main
   identities: []
   providers:
