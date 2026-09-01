@@ -23,6 +23,14 @@ afterEach(async () => {
   vi.unstubAllEnvs();
 });
 
+/**
+ * Booting a real Fastify instance - every plugin registered, every route
+ * schema compiled by Ajv - is the cost this file exists to pay, and under
+ * `pnpm check` it is paid while the coverage-instrumented suite and three Next
+ * dev servers compile around it. Measured at 7.7s against the 5s default. The
+ * budget belongs to the suite rather than to one test: the first test does not
+ * absorb the boot on behalf of the rest, because each test boots its own app.
+ */
 describe('the api app factory', () => {
   it('boots with the configuration it read from the environment', async () => {
     const instance = app();
@@ -151,4 +159,4 @@ describe('the api app factory', () => {
     });
     expect(response.body).not.toContain('hunter2');
   });
-});
+}, 60_000);

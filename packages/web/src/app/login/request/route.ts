@@ -31,9 +31,9 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   // 303 so the browser follows with a GET; a refresh of the confirmation then
-  // reloads a page rather than re-posting the form.
-  return new Response(null, {
-    status: 303,
-    headers: { location: new URL('/login?sent=1', request.url).toString() },
-  });
+  // reloads a page rather than re-posting the form. Relative, because
+  // `request.url` names the host this process thinks it is - `localhost` even
+  // for a browser on `127.0.0.1` - and a redirect built from it would send the
+  // reader to an origin they never asked for.
+  return new Response(null, { status: 303, headers: { location: '/login?sent=1' } });
 }

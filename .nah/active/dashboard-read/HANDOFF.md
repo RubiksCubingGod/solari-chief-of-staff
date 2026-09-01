@@ -471,16 +471,50 @@ lockfile = await Lockfile.acquireWithRetriesOrExit(
 ```
 
 The lock lives **inside `distDir`**, so instances that do not share a build directory do not
-share a lock. `startWebDevServer` now gives each instance its own - `.next/instance-<uuid>`,
-passed as `conf: { distDir }` - and removes it on `stop()`, best effort, because a build artefact
-Windows still holds a handle to is not worth failing a teardown over. `packages/web` has no
-`next.config`, so nothing is being overridden.
+share a lock. That much was right. What was wrong was the lever.
+
+`next()` accepts a `conf` option, and `startWebDevServer` passed `conf: { distDir:
+'.next/instance-<uuid>' }`. **Next discards it.** The option is forwarded to `loadConfig` as
+`customConfig` (`next/dist/server/next.js`), and the key that config is cached under records
+only whether one was supplied (`next/dist/server/config.js`):
+
+```js
+const keyData = JSON.stringify({
+    dir,
+    phase,
+    hasCustomConfig: Boolean(customConfig),
+    ...
+});
+```
+
+Two configs that differ only in what they say are the same key, so the first load wins for the
+life of the process and every instance keeps the default `.next`.
+
+A probe settles that faster than any amount of reading: boot one dev server with
+`conf: { distDir: '.next/probe-instance' }` and ask the filesystem what happened.
+
+```
+PROBE probe-dir-exists: false
+PROBE next-entries: dev
+```
+
+The directory is never created. The isolation had never existed - not once, not partially - and
+the two-suite run that was taken as proof of it passed only because two suites happened not to
+overlap, which is precisely the failure this section was written about.
+
+**The lever that works is a config file on disk**, which Next loads itself and does not route
+through that cache. `packages/web/next.config.mjs` reads `distDir` from `NEXT_DIST_DIR`, and
+`startWebDevServer` sets that variable to `.next/instance-<uuid>` before `prepare()` and restores
+it in `stop()` - alongside the `API_BASE_URL` it already hands over the same way, because Next
+reads its configuration from the environment exactly as a deployed app does. Unset, which is
+every case but these tests, leaves Next on its default, so `next build` and `pnpm check` are
+untouched. The same probe against the config file creates the directory and puts the `dev` lock
+inside it.
 
 That helper's own doc comment already promised this: *"the instance belongs to one test file, two
-files cannot collide on a port"*. The promise was true about ports and silently false about the
-build directory from the moment a second suite existed. It now says "on a port or on a build
-directory" and delivers both. Proven by running the two suites together, which is the condition
-that failed: 2 files, 9 tests, 18.4s.
+files cannot collide on a port or on a build directory"*. It was true about ports and silently
+false about build directories from the moment a second suite existed - and stayed false through a
+fix that read correctly, matched the source, and did nothing.
 
 ### The pattern worth naming
 
@@ -490,6 +524,128 @@ red under `pnpm check`, because the thing that breaks is a resource the isolated
 contends for** - a type-aware ESLint program built while a coverage-instrumented suite runs, and
 now a dev-server lock held by a sibling test file.
 
-The lesson for the remaining page tasks, which will add more `startWebDevServer` callers: a web
-integration suite that passes on its own has not been tested yet. Run it alongside
-`smoke-page.integration.test.ts` before believing it.
+Two lessons for the remaining page tasks, which will add more `startWebDevServer` callers:
+
+- **A web integration suite that passes on its own has not been tested yet.** Run it in one
+  command with every other suite that boots a dashboard. All three now pass together - 3 files,
+  15 tests, 88s - and that is the condition the gate reproduces, so it is the condition to
+  reproduce first.
+- **A fix aimed at a framework's internals is not finished when it reads correctly.** The `conf`
+  route was plausible, cited the right source, and was inert. Ask the filesystem what actually
+  happened before recording it as proven; a passing run is evidence about scheduling until the
+  contended case is the one that ran.
+
+### Fixing the lock made the gate slower, and two other suites said so
+
+Worth recording because it is counter-intuitive: repairing the dev lock made the next gate run
+*harder*, not easier. Before the fix the third dashboard died instantly - `process.exit(1)` costs
+nothing - so the gate had been running two dev servers and reporting a failure. Afterwards it
+runs three, all compiling with Turbopack, and two unit tests that had never been near a timeout
+fell over at 7.7s and 8.2s against vitest's 5s default:
+
+- `packages/api/src/app.test.ts` - every test boots a real Fastify instance, plugins registered
+  and route schemas compiled by Ajv.
+- `packages/api/src/server.test.ts` - the only API test that binds a socket.
+
+Both now carry a suite budget of `60_000`, the same shape and for the same reason as
+`api-boundary.test.ts` above: the cost belongs to every test in the file rather than to whichever
+runs first, because each test pays it again. Neither assertion changed; neither test is
+measuring speed, and a 5s budget on a real server boot is a benchmark wearing a unit test's
+clothes.
+
+### A route the browser proves is a route coverage cannot see
+
+`packages/web/src/app/watches/pause/route.ts` was **7 of 7 branches uncovered** while a passing
+e2e clicked its button, posted its form and read back the status it set. That is not a gap in the
+e2e. The dashboard runs in its own dev server, so nothing it executes is instrumented by the
+vitest process that is measuring - and the global branch threshold fell to 89.28% on the strength
+of one small file.
+
+`packages/web/src/watches/pause-route.test.ts` closes it, and is a better test than a number
+would have needed: the browser can prove the route works, but it cannot post a form with no `id`
+or a status the domain does not have, so the guards were unprovable from outside. The rule for
+`calendar-tasks-pages`: **every `.ts` under `src/app/` needs a unit test of its own**, however
+thoroughly a browser exercises it. `.tsx` is outside the coverage glob and does not, which is the
+other half of why logic belongs in `.ts` and presentation in `.tsx`.
+
+## The watches page found a redirect that quietly changes host, and drops the session doing it
+
+`watches-page` added the one write this read dashboard performs: a pause/resume form posting to
+`/watches/pause`, which calls the CRUD route and 303s back to the list. It failed on the first
+green run, and the failure is worth keeping because nothing before it could have found it.
+
+The browser posted the form, the route answered `303`, and the browser arrived at
+**`http://localhost:55608/login`** - signed out, at the sign-in page, having just been signed in.
+
+The route was building its redirect the way the two routes before it did:
+
+```ts
+new URL('/watches', request.url).toString()
+```
+
+`request.url` does not report the host the browser dialled. In this configuration Next fills it
+in as `localhost` whatever the request's `Host` header said, so a browser on `127.0.0.1` was
+being sent to `localhost` - a different origin as far as a cookie jar is concerned. The session
+cookie is host-only by deliberate design (`.env.example`: no `Domain` unless the API and the
+dashboard are on separate subdomains), so it was not sent, so the guard did exactly what it
+should and bounced an unauthenticated request to `/login`.
+
+The fix is a **relative `Location`**, which HTTP has always allowed and which leaves the browser
+on the host it already chose:
+
+```ts
+return new Response(null, { status: 303, headers: { location: '/watches' } });
+```
+
+### Why the two older routes had the same bug and nobody knew
+
+`/logout` and `/login/request` were written the same way in `magic-link-auth` and are now fixed
+the same way. Neither was *failing*, and that is the whole lesson: their proofs assert on the
+path they land on (`waitForURL(/\/login\?sent=1$/u)`), and the path survives a host swap
+perfectly. Only a redirect whose destination needs the session to still be attached can tell the
+difference - and `/watches/pause` is the first one this sprint has had. A test that matches on
+`pathname` is blind to the origin by construction; if a later section adds a form post that has
+to stay signed in, assert on the full URL, not the path.
+
+### One smaller trap, for the pages still to come
+
+`page.getByRole('alert')` finds Next's own dev-tools live region - an empty `role="alert"` the
+dev server puts in the same `<body>` - so an assertion that the page shows no error has to be
+scoped to the page: `page.locator('main').getByRole('alert')`. Unscoped, it counts the framework
+and fails against a page that is perfectly fine.
+
+## What `calendar-tasks-pages` can pick up unchanged
+
+The fixture now seeds, not just authenticates. `startAuthStack(...).seedAccount({ email, watches })`
+creates an account with rows under it and hands back exactly what it planted, so every assertion
+reads off the seed rather than off a fixture's private knowledge:
+
+```ts
+watcher = await stack.seedAccount({
+  email: 'watcher@example.test',
+  watches: [{ url: LAPTOP, series: [149, 139, 129] }, { url: GPU }],
+});
+```
+
+Two accounts are seeded in `watches-page.integration.test.ts` rather than one, and that is not
+thoroughness for its own sake: a single-account fixture cannot express the property that matters
+most, because a page that ignores the session entirely still passes it. The calendar and task
+pages need the same shape - `seedAccount` takes only `watches` today and wants
+`calendarItems` and `tasks` adding beside it, in the same "echo back what was planted" style.
+
+The API side those pages need is already built and closed: `GET /calendar-items` and `GET /tasks`
+landed in s1, and `packages/web/src/api-client.ts` already exposes `listCalendarItems` and
+`listTasks`. No new routes are required - which is worth stating plainly, because the sprint
+README's design notes anticipated task read routes as part of this sprint and they turned out to
+already exist.
+
+Two conventions from the watches page are worth copying rather than reinventing:
+
+- **Logic in `.ts`, presentation in `.tsx`.** The coverage gate includes `packages/*/src/**/*.ts`
+  and nothing else, so anything with a branch worth proving belongs in a `.ts` module with a unit
+  test - `watches/view-model.ts` and `watches/sparkline-path.ts` - and the `.tsx` stays thin
+  enough that reading it is the whole review.
+- **What a browser cannot provoke, prove against the loader.** A real API that is working cannot
+  be made to refuse on cue without breaking the run it is in the middle of, so the outage, the
+  refusal, and the one-row-failed-while-the-rest-are-fine cases live in `view-model.test.ts`. The
+  e2e claim says so explicitly rather than implying the browser proved them.

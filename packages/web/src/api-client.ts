@@ -1,6 +1,7 @@
 import type {
   CalendarItemKind,
   CalendarItemStatus,
+  FetchTier,
   TaskKind,
   TaskMode,
   TaskStatus,
@@ -32,6 +33,23 @@ export interface Watch {
   readonly lastValue: unknown;
   readonly lastCheckedAt: string | null;
   readonly consecutiveFailures: number;
+}
+
+/**
+ * One check of one watch, as `GET /watches/:id/observations` sends it.
+ *
+ * `value` is `unknown` because it is whatever the extractor pulled off the
+ * page: a price is a number, a slot is a string, a change is a document. Only
+ * the caller knows what it asked for, so nothing here pretends to.
+ */
+export interface Observation {
+  readonly id: string;
+  readonly watchId: string;
+  readonly checkedAt: string;
+  readonly tierUsed: FetchTier;
+  readonly value: unknown;
+  readonly triggered: boolean;
+  readonly error: string | null;
 }
 
 export interface CalendarItem {
@@ -191,6 +209,14 @@ export interface ApiClient {
    */
   requestLink(email: string): Promise<void>;
   listWatches(): Promise<readonly Watch[]>;
+  /**
+   * One watch's recent checks, oldest first - the order a sparkline plots, and
+   * the order the server already sends, so no caller reverses it.
+   *
+   * A watch belonging to somebody else is refused as `not_found`, the same as
+   * one that never existed, so a caller cannot learn an id is real by asking.
+   */
+  listObservations(watchId: string): Promise<readonly Observation[]>;
   setWatchStatus(id: string, status: WatchStatus): Promise<Watch>;
   listCalendarItems(): Promise<readonly CalendarItem[]>;
   listTasks(): Promise<readonly Task[]>;
@@ -262,6 +288,11 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
       await request<unknown>('POST', '/auth/request-link', { email });
     },
     listWatches: () => request<readonly Watch[]>('GET', '/watches'),
+    listObservations: (watchId) =>
+      request<readonly Observation[]>(
+        'GET',
+        `/watches/${encodeURIComponent(watchId)}/observations`,
+      ),
     setWatchStatus: (id, status) =>
       request<Watch>('PATCH', `/watches/${encodeURIComponent(id)}`, { status }),
     listCalendarItems: () => request<readonly CalendarItem[]>('GET', '/calendar-items'),

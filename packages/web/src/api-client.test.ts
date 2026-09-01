@@ -121,6 +121,28 @@ describe('createApiClient', () => {
     expect(stub.calls[0]?.headers['content-type']).toBe('application/json');
   });
 
+  it("reads one watch's observations from the path under that watch", async () => {
+    const series = [
+      { id: 'observation-1', watchId: 'a/b', value: 149, triggered: false, error: null },
+      { id: 'observation-2', watchId: 'a/b', value: 129, triggered: true, error: null },
+    ];
+    const stub = stubFetch(() => json(series));
+    const client = createApiClient({
+      baseUrl: BASE_URL,
+      fetch: stub.fetch,
+      credential: sessionCookieCredential(SESSION),
+    });
+
+    const observations = await client.listObservations('a/b');
+
+    // Handed back in the order the server sent, which is the order a sparkline
+    // plots. A client that reversed it would draw every trend backwards.
+    expect(observations).toEqual(series);
+    expect(stub.calls[0]?.url).toBe(`${BASE_URL}/watches/a%2Fb/observations`);
+    expect(stub.calls[0]?.method).toBe('GET');
+    expect(stub.calls[0]?.headers['cookie']).toBe(SESSION);
+  });
+
   it('surfaces a refusal by its code and its details, not by its wording', async () => {
     const stub = stubFetch(() =>
       json(

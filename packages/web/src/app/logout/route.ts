@@ -22,9 +22,12 @@ export async function POST(request: Request): Promise<Response> {
     headers: cookieHeader === null ? {} : { cookie: cookieHeader },
   });
 
-  const headers = new Headers({
-    location: new URL(REQUEST_LINK_PATH, request.url).toString(),
-  });
+  // Relative, because `request.url` reports the host this process thinks it is
+  // rather than the one the browser dialled - `localhost` even for a browser on
+  // `127.0.0.1`. An absolute `Location` built from it moves the reader to
+  // another origin on the way out, which at best signs them back in somewhere
+  // else and at worst names a host nothing outside the server can reach.
+  const headers = new Headers({ location: REQUEST_LINK_PATH });
   const cleared = response.headers.get('set-cookie');
   if (cleared !== null) headers.append('set-cookie', cleared);
   return new Response(null, { status: 303, headers });

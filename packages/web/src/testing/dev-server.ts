@@ -15,6 +15,13 @@ const APPLICATION_DIRECTORY = fileURLToPath(new URL('../..', import.meta.url));
 const HOST = '127.0.0.1';
 
 /**
+ * The variable `packages/web/next.config.mjs` reads its build directory from.
+ * The name is repeated there rather than imported, because a Next config is
+ * loaded as plain JavaScript and cannot see this module.
+ */
+const DIST_DIR_VARIABLE = 'NEXT_DIST_DIR';
+
+/**
  * A Next dev server owned by exactly one test file.
  */
 export interface WebDevServer {
@@ -65,25 +72,29 @@ export async function startWebDevServer(
   const { port } = server.address() as AddressInfo;
   const url = `http://${HOST}:${String(port)}`;
 
-  // Next 16 takes an exclusive lock at `<distDir>/lock` and refuses to start a
-  // second dev server that would share it, so the build directory is per
-  // instance rather than the default one every instance would contend on.
-  // Without this, two test files booting a dashboard in parallel is not a race
-  // that sometimes passes: the loser calls `process.exit(1)` on the spot.
+  // Next 16 takes an exclusive lock at <distDir>/lock and the loser calls
+  // process.exit(1) rather than waiting, so the build directory has to be per
+  // instance. It is set here through the environment because that is the only
+  // lever that moves it: the `conf` option `next()` accepts is loaded and then
+  // discarded, since `loadConfig` caches on `Boolean(customConfig)` rather than
+  // on what the config actually says. `packages/web/next.config.mjs` reads this
+  // variable back, and Next honours a config it loaded from disk.
   const buildDirectory = `.next/instance-${randomUUID()}`;
+  const restoreBuildDirectory = withEnvironmentVariable(DIST_DIR_VARIABLE, buildDirectory);
 
   const app = next({
     dev: true,
     dir: APPLICATION_DIRECTORY,
     hostname: HOST,
     port,
-    conf: { distDir: buildDirectory },
   });
+
   let stopped = false;
   const stop = async (): Promise<void> => {
     if (stopped) return;
     stopped = true;
     restoreEnvironment();
+    restoreBuildDirectory();
     // Keep-alive sockets from fetch outlive the response; without this the
     // close callback never fires and the port stays bound.
     server.closeAllConnections();
