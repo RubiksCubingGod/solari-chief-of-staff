@@ -1,0 +1,29 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./packages/core"
+    },
+    {
+      "path": "./packages/db"
+    },
+    {
+      "path": "./packages/solari"
+    },
+    {
+      "path": "./packages/agent"
+    },
+    {
+      "path": "./packages/playbooks"
+    },
+    {
+      "path": "./packages/api"
+    },
+    {
+      "path": "./packages/bot"
+    },
+    {
+      "path": "./packages/web"
+    }
+  ]
+}

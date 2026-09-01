@@ -1,0 +1,19 @@
+{
+  "name": "@chief-of-staff/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Engines, state machines, and pure domain logic (100% line coverage enforced).",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build"
+  }
+}

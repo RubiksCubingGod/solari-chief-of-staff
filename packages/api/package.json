@@ -1,0 +1,19 @@
+{
+  "name": "@chief-of-staff/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Fastify HTTP server.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "chief-of-staff",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.18.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --build --force && tsc -p tsconfig.test.json",
+    "test": "vitest run --coverage",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
+    "build": "tsc --build",
+    "clean": "tsc --build --clean",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "26.4.0",
+    "@vitest/coverage-v8": "4.1.11",
+    "eslint": "10.9.1",
+    "globals": "17.11.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.69.0",
+    "vitest": "4.1.11"
+  }
+}

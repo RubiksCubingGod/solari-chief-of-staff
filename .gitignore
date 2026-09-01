@@ -1,3 +1,9 @@
 .nah/config.local.yaml
 .nah/credentials.env
 .nah/.traces/
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.env
+.env.local

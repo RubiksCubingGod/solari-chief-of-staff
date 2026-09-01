@@ -1,0 +1,19 @@
+{
+  "name": "@chief-of-staff/playbooks",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Per-site deterministic scripted flows.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build"
+  }
+}

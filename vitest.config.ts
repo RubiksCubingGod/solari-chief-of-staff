@@ -1,0 +1,85 @@
+import { fileURLToPath } from 'node:url';
+
+import { defineConfig } from 'vitest/config';
+
+const WORKSPACE_PACKAGES = [
+  'core',
+  'db',
+  'solari',
+  'agent',
+  'playbooks',
+  'api',
+  'bot',
+  'web',
+] as const;
+
+/**
+ * Tests import workspace packages by name but resolve to their TypeScript
+ * source, so a test run never depends on a prior build and coverage is
+ * attributed to source lines rather than emitted output.
+ */
+const sourceAliases = Object.fromEntries(
+  WORKSPACE_PACKAGES.map((name) => [
+    `@chief-of-staff/${name}`,
+    fileURLToPath(new URL(`./packages/${name}/src/index.ts`, import.meta.url)),
+  ]),
+);
+
+/**
+ * The coverage gate from ARCHITECTURE §9.3. Exported so the gate itself is
+ * assertable in a unit test instead of being trusted by inspection.
+ */
+export const CORE_COVERAGE_GLOB = 'packages/core/src/**/*.ts';
+
+export const coverageThresholds = {
+  lines: 90,
+  functions: 90,
+  branches: 90,
+  statements: 90,
+  [CORE_COVERAGE_GLOB]: {
+    lines: 100,
+    functions: 100,
+    branches: 100,
+    statements: 100,
+  },
+};
+
+const TEST_FILE_GLOBS = ['**/*.test.ts', '**/*.integration.test.ts'];
+const ALWAYS_EXCLUDED = ['**/node_modules/**', '**/dist/**', '**/coverage/**'];
+
+export default defineConfig({
+  resolve: { alias: sourceAliases },
+  test: {
+    // The integration project legitimately matches nothing until the Postgres
+    // harness lands. An empty run is not a silent hole: the coverage
+    // thresholds below fail the moment tests stop executing.
+    passWithNoTests: true,
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'unit',
+          include: ['packages/*/src/**/*.test.ts'],
+          exclude: [...ALWAYS_EXCLUDED, '**/*.integration.test.ts'],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'integration',
+          include: ['packages/*/src/**/*.integration.test.ts'],
+          exclude: ALWAYS_EXCLUDED,
+          testTimeout: 120_000,
+          hookTimeout: 120_000,
+        },
+      },
+    ],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text-summary', 'lcov'],
+      include: ['packages/*/src/**/*.ts'],
+      exclude: TEST_FILE_GLOBS,
+      thresholds: coverageThresholds,
+    },
+  },
+});
