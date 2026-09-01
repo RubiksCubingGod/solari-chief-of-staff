@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import { AJV_FORMATS, isCronExpression, isHttpUrl, isIsoDate, isUuid } from './formats.js';
+import {
+  AJV_FORMATS,
+  MAX_OBSERVATION_LIMIT,
+  isCronExpression,
+  isHttpUrl,
+  isIsoDate,
+  isIsoInstant,
+  isObservationLimit,
+  isUuid,
+} from './formats.js';
 
 describe('isUuid', () => {
   it('accepts a canonical uuid in either case', () => {
@@ -58,12 +67,54 @@ describe('isIsoDate', () => {
   });
 });
 
+describe('isIsoInstant', () => {
+  it('accepts an instant with a zone, at second and millisecond precision', () => {
+    expect(isIsoInstant('2026-08-02T00:00:00Z')).toBe(true);
+    expect(isIsoInstant('2026-08-02T00:00:00.000Z')).toBe(true);
+    expect(isIsoInstant('2026-08-02T02:00:00+02:00')).toBe(true);
+  });
+
+  it('rejects an instant with no zone, a calendar day, and a date that does not exist', () => {
+    // Without a zone the bound would mean a different moment to every caller.
+    expect(isIsoInstant('2026-08-02T00:00:00')).toBe(false);
+    expect(isIsoInstant('2026-08-02')).toBe(false);
+    expect(isIsoInstant('2026-02-30T00:00:00Z')).toBe(false);
+    expect(isIsoInstant('2026-08-02T24:00:00Z')).toBe(false);
+    expect(isIsoInstant('2026-08-02T00:00:00+25:00')).toBe(false);
+    expect(isIsoInstant('yesterday')).toBe(false);
+    expect(isIsoInstant('')).toBe(false);
+  });
+});
+
+describe('isObservationLimit', () => {
+  it('accepts a plain count up to the ceiling', () => {
+    expect(isObservationLimit('1')).toBe(true);
+    expect(isObservationLimit('250')).toBe(true);
+    expect(isObservationLimit(String(MAX_OBSERVATION_LIMIT))).toBe(true);
+  });
+
+  it('rejects a count past the ceiling and anything that is not one', () => {
+    expect(isObservationLimit(String(MAX_OBSERVATION_LIMIT + 1))).toBe(false);
+    expect(isObservationLimit('0')).toBe(false);
+    expect(isObservationLimit('-1')).toBe(false);
+    // A leading zero, a decimal point and an exponent all reach `Number` as
+    // something other than the count they look like, so none of them get there.
+    expect(isObservationLimit('007')).toBe(false);
+    expect(isObservationLimit('2.5')).toBe(false);
+    expect(isObservationLimit('1e2')).toBe(false);
+    expect(isObservationLimit('abc')).toBe(false);
+    expect(isObservationLimit('')).toBe(false);
+  });
+});
+
 describe('AJV_FORMATS', () => {
   it('names every format the route schemas reference', () => {
     expect(Object.keys(AJV_FORMATS).sort()).toEqual([
       'cron-expression',
       'http-url',
       'iso-date',
+      'iso-instant',
+      'observation-limit',
       'uuid',
     ]);
   });

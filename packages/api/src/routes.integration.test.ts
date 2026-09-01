@@ -1,6 +1,13 @@
 import { randomUUID } from 'node:crypto';
 
-import { runMigrations, tasks, users, watches, calendarItems } from '@chief-of-staff/db';
+import {
+  observations,
+  runMigrations,
+  tasks,
+  users,
+  watches,
+  calendarItems,
+} from '@chief-of-staff/db';
 import { startTestPostgres, type TestPostgres } from '@chief-of-staff/db/testing';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -62,6 +69,24 @@ function paths(body: string): string[] {
 
 function code(body: string): string {
   return (JSON.parse(body) as { error: { code: string } }).error.code;
+}
+
+async function createWatchFor(userId: string): Promise<string> {
+  const [created] = await app.db
+    .insert(watches)
+    .values({ ...A_WATCH, userId, extractor: {} })
+    .returning();
+  if (created === undefined) throw new Error('the fixture watch was not created');
+  return created.id;
+}
+
+/**
+ * A refusal with the row id taken out of it, so the answer to a stranger's row
+ * and the answer to a row that never existed can be compared character for
+ * character without pinning the wording either of them uses.
+ */
+function withoutId(body: string, id: string): string {
+  return body.replaceAll(id, '{id}');
 }
 
 describe('POST /watches', () => {
@@ -148,15 +173,6 @@ describe('POST /watches', () => {
 });
 
 describe('PATCH /watches/:id', () => {
-  async function createWatchFor(userId: string): Promise<string> {
-    const [created] = await app.db
-      .insert(watches)
-      .values({ ...A_WATCH, userId, extractor: {} })
-      .returning();
-    if (created === undefined) throw new Error('the fixture watch was not created');
-    return created.id;
-  }
-
   it('pauses and resumes a watch the caller owns', async () => {
     const id = await createWatchFor(ownerId);
 
@@ -332,5 +348,259 @@ describe('GET /tasks', () => {
       newer?.id,
       older?.id,
     ]);
+  });
+});
+
+describe('GET /watches/:id/observations', () => {
+  // Five checks a day apart. The window every bounded test asks for opens on
+  // the second and closes on the fourth, so one observation sits on each edge
+  // and one sits outside each edge.
+  const CHECKED_AT = [
+    '2026-08-01T00:00:00.000Z',
+    '2026-08-02T00:00:00.000Z',
+    '2026-08-03T00:00:00.000Z',
+    '2026-08-04T00:00:00.000Z',
+    '2026-08-05T00:00:00.000Z',
+  ] as const;
+
+  async function seedSeries(watchId: string): Promise<void> {
+    await app.db.insert(observations).values(
+      CHECKED_AT.map((at, index) => ({
+        watchId,
+        checkedAt: new Date(at),
+        tierUsed: 'http' as const,
+        value: { cents: 4900 + index },
+        triggered: index === CHECKED_AT.length - 1,
+      })),
+    );
+  }
+
+  function series(body: string): string[] {
+    return (JSON.parse(body) as { checkedAt: string }[]).map((row) => row.checkedAt);
+  }
+
+  it('returns the whole series oldest first, with everything a sparkline draws', async () => {
+    const id = await createWatchFor(ownerId);
+    await seedSeries(id);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/watches/${id}/observations`,
+      headers: asOwner(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(series(response.body)).toEqual([...CHECKED_AT]);
+    // The row carries the value, the tier and the trigger flag, so the page
+    // draws the point, the marker and the failure state without asking again.
+    expect(response.json<Record<string, unknown>[]>()[0]).toMatchObject({
+      watchId: id,
+      checkedAt: CHECKED_AT[0],
+      tierUsed: 'http',
+      value: { cents: 4900 },
+      triggered: false,
+      error: null,
+    });
+  });
+
+  it('returns only the observations inside the half-open window', async () => {
+    const id = await createWatchFor(ownerId);
+    await seedSeries(id);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/watches/${id}/observations?from=${CHECKED_AT[1]}&to=${CHECKED_AT[3]}`,
+      headers: asOwner(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    // `from` is inclusive and `to` is exclusive, so the observation on the
+    // opening edge is in the window and the one on the closing edge is not.
+    expect(series(response.body)).toEqual([CHECKED_AT[1], CHECKED_AT[2]]);
+  });
+
+  it('keeps the newest observations when the series is longer than the limit', async () => {
+    const id = await createWatchFor(ownerId);
+    await seedSeries(id);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/watches/${id}/observations?limit=2`,
+      headers: asOwner(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(series(response.body)).toEqual([CHECKED_AT[3], CHECKED_AT[4]]);
+  });
+
+  it('answers a watch that has never been checked with an empty series', async () => {
+    const id = await createWatchFor(ownerId);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/watches/${id}/observations`,
+      headers: asOwner(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([]);
+  });
+
+  it('refuses another user’s watch exactly as it refuses one that never existed', async () => {
+    const strangerWatchId = await createWatchFor(strangerId);
+    await seedSeries(strangerWatchId);
+    const unknownId = randomUUID();
+
+    const stranger = await app.inject({
+      method: 'GET',
+      url: `/watches/${strangerWatchId}/observations`,
+      headers: asOwner(),
+    });
+    const unknown = await app.inject({
+      method: 'GET',
+      url: `/watches/${unknownId}/observations`,
+      headers: asOwner(),
+    });
+
+    expect(stranger.statusCode).toBe(404);
+    expect(code(stranger.body)).toBe('not_found');
+    expect(unknown.statusCode).toBe(404);
+    expect(code(unknown.body)).toBe('not_found');
+    // Nothing in either answer tells the caller which of the two it hit.
+    expect(withoutId(stranger.body, strangerWatchId)).toBe(withoutId(unknown.body, unknownId));
+  });
+
+  it('refuses a bound it cannot read, a limit past the ceiling, and an unknown parameter', async () => {
+    const id = await createWatchFor(ownerId);
+
+    for (const query of [
+      // A calendar day is not an instant: the window would start at a different
+      // moment for every caller's zone.
+      'from=2026-08-02',
+      'from=yesterday',
+      'to=2026-08-04T00:00:00',
+      'limit=0',
+      'limit=abc',
+      'limit=-1',
+      'limit=501',
+      // A misspelled bound is a wider window than the caller asked for, so it
+      // is refused rather than dropped.
+      'since=2026-08-02T00:00:00.000Z',
+    ]) {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/watches/${id}/observations?${query}`,
+        headers: asOwner(),
+      });
+      expect(response.statusCode, query).toBe(400);
+      expect(code(response.body), query).toBe('validation_failed');
+    }
+  });
+
+  it('refuses a window that ends before it starts rather than answering nothing', async () => {
+    const id = await createWatchFor(ownerId);
+    await seedSeries(id);
+
+    for (const query of [
+      `from=${CHECKED_AT[3]}&to=${CHECKED_AT[1]}`,
+      `from=${CHECKED_AT[1]}&to=${CHECKED_AT[1]}`,
+    ]) {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/watches/${id}/observations?${query}`,
+        headers: asOwner(),
+      });
+      expect(response.statusCode, query).toBe(400);
+      expect(code(response.body), query).toBe('bad_request');
+    }
+  });
+
+  it('refuses a watch id that is not a uuid', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/watches/not-a-uuid/observations',
+      headers: asOwner(),
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(code(response.body)).toBe('validation_failed');
+    expect(paths(response.body)).toEqual(['/id']);
+  });
+});
+
+describe('GET /tasks/:id', () => {
+  async function createTaskFor(userId: string): Promise<string> {
+    const [created] = await app.db
+      .insert(tasks)
+      .values({
+        userId,
+        kind: 'cancel',
+        mode: 'playbook',
+        input: { what: 'gym' },
+        status: 'succeeded',
+        playbookId: 'planet-fitness-cancel',
+        result: { cancelled: true },
+        createdAt: new Date('2026-08-01T00:00:00Z'),
+        finishedAt: new Date('2026-08-01T00:04:00Z'),
+      })
+      .returning();
+    if (created === undefined) throw new Error('the fixture task was not created');
+    return created.id;
+  }
+
+  it('returns the whole task row the history shell renders', async () => {
+    const id = await createTaskFor(ownerId);
+
+    const response = await app.inject({ method: 'GET', url: `/tasks/${id}`, headers: asOwner() });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      id,
+      userId: ownerId,
+      kind: 'cancel',
+      mode: 'playbook',
+      status: 'succeeded',
+      input: { what: 'gym' },
+      playbookId: 'planet-fitness-cancel',
+      result: { cancelled: true },
+      createdAt: '2026-08-01T00:00:00.000Z',
+      finishedAt: '2026-08-01T00:04:00.000Z',
+      solariSessionId: null,
+      recordingUrl: null,
+    });
+  });
+
+  it('refuses another user’s task exactly as it refuses one that never existed', async () => {
+    const strangerTaskId = await createTaskFor(strangerId);
+    const unknownId = randomUUID();
+
+    const stranger = await app.inject({
+      method: 'GET',
+      url: `/tasks/${strangerTaskId}`,
+      headers: asOwner(),
+    });
+    const unknown = await app.inject({
+      method: 'GET',
+      url: `/tasks/${unknownId}`,
+      headers: asOwner(),
+    });
+
+    expect(stranger.statusCode).toBe(404);
+    expect(code(stranger.body)).toBe('not_found');
+    expect(unknown.statusCode).toBe(404);
+    expect(code(unknown.body)).toBe('not_found');
+    expect(withoutId(stranger.body, strangerTaskId)).toBe(withoutId(unknown.body, unknownId));
+  });
+
+  it('refuses a task id that is not a uuid', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/tasks/not-a-uuid',
+      headers: asOwner(),
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(code(response.body)).toBe('validation_failed');
+    expect(paths(response.body)).toEqual(['/id']);
   });
 });

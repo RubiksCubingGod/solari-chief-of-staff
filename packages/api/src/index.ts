@@ -20,5 +20,13 @@ export {
   type ErrorEnvelope,
   type SchemaViolation,
 } from './errors.js';
-export { isCronExpression, isHttpUrl, isIsoDate, isUuid } from './formats.js';
+export {
+  MAX_OBSERVATION_LIMIT,
+  isCronExpression,
+  isHttpUrl,
+  isIsoDate,
+  isIsoInstant,
+  isObservationLimit,
+  isUuid,
+} from './formats.js';
 export { startServer, type RunningServer } from './server.js';
