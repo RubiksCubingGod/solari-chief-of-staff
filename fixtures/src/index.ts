@@ -31,9 +31,24 @@ export {
   type StartFixtureOptions,
 } from './harness.js';
 export {
+  buildModeControl,
+  createModeState,
+  DEFAULT_ESCALATION_TOKEN,
+  ESCALATION_HEADER,
+  FIXTURE_MODES,
+  type FixtureMode,
+  type ModeControl,
+  type ModeState,
+} from './modes.js';
+export {
   BLOCKED_SHELL_STATE,
+  blockedShellPage,
+  documentShell,
   escapeHtml,
+  type Layout,
   NORMAL_STATE,
   NOT_FOUND_STATE,
+  notFoundPage,
+  type PageContent,
 } from './pages.js';
 export { type ProbeControl, startProbeFixture } from './probe.js';

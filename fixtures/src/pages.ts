@@ -11,6 +11,18 @@ export const NORMAL_STATE = 'fixture-state:normal';
 export const NOT_FOUND_STATE = 'fixture-state:not-found';
 export const BLOCKED_SHELL_STATE = 'fixture-state:blocked';
 
+/**
+ * The two stable layouts every observation target renders. `redesign` rotates
+ * class names, element ids, and nesting; it never touches the semantic surface.
+ */
+export type Layout = 'normal' | 'redesign';
+
+/** A rendered page, split so a hostile mode can wrap or withhold the body. */
+export interface PageContent {
+  readonly title: string;
+  readonly main: string;
+}
+
 export function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -56,6 +68,44 @@ export function notFoundPage(what: string): string {
     main: [
       '      <h1 data-testid="not-found">Not found</h1>',
       `      <p>No ${escapeHtml(what)} with that identifier exists.</p>`,
+    ].join('\n'),
+  });
+}
+
+/**
+ * The captcha shell.
+ *
+ * When `payload` is supplied (`blocked`), the real body travels base64-encoded
+ * inside a script the client must run. The encoding is not decoration: served
+ * as plain markup, a tier-0 extractor scraping for `data-testid` would find the
+ * observable values in the shell and the mode would discriminate nothing. With
+ * it, only a client that executes JavaScript can materialize the content, which
+ * is exactly the claim `blocked` exists to make.
+ *
+ * When `payload` is omitted (`hard-blocked`), the shell carries no recoverable
+ * body at all, so running scripts does not help - only the escalation marker does.
+ */
+export function blockedShellPage(payload?: string): string {
+  const injection =
+    payload === undefined
+      ? []
+      : [
+          '      <script>',
+          "        document.addEventListener('DOMContentLoaded', function () {",
+          `          document.querySelector('main').innerHTML = atob('${Buffer.from(payload, 'utf8').toString('base64')}');`,
+          '        });',
+          '      </script>',
+        ];
+
+  return documentShell({
+    title: 'Checking your browser',
+    state: BLOCKED_SHELL_STATE,
+    main: [
+      '      <div class="ch-challenge" data-testid="captcha-challenge">',
+      '        <h1 class="ch-heading">Checking your browser</h1>',
+      '        <p>Enable JavaScript and cookies to continue.</p>',
+      '      </div>',
+      ...injection,
     ].join('\n'),
   });
 }

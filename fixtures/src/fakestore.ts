@@ -7,7 +7,8 @@ import {
   startFixture,
   type StartFixtureOptions,
 } from './harness.js';
-import { documentShell, escapeHtml, NORMAL_STATE, notFoundPage } from './pages.js';
+import { buildModeControl, createModeState, type ModeControl } from './modes.js';
+import { escapeHtml, type Layout, notFoundPage, type PageContent } from './pages.js';
 
 export type StockState = 'in_stock' | 'out_of_stock';
 
@@ -21,7 +22,7 @@ export interface Product extends ProductInput {
   readonly id: string;
 }
 
-export interface FakestoreControl {
+export interface FakestoreControl extends ModeControl {
   setProduct(id: string, input: ProductInput): Promise<Product>;
   product(id: string): Promise<Product>;
 }
@@ -32,8 +33,7 @@ const STOCK_LABELS: Record<StockState, string> = {
 };
 
 function parseProduct(id: string, body: unknown): Product | string {
-  const record = readRecord(body);
-  const { title, price, stock } = record;
+  const { title, price, stock } = readRecord(body);
 
   if (typeof title !== 'string' || title.trim() === '') {
     return 'title must be a non-empty string';
@@ -48,48 +48,83 @@ function parseProduct(id: string, body: unknown): Product | string {
 }
 
 /**
+ * The observable facts of a product, named once so both layouts render exactly
+ * the same accessible names, hooks, and text. The redesign rotates the markup
+ * around this list; it cannot rotate the list itself.
+ */
+function facts(product: Product): { label: string; testId: string; text: string }[] {
+  const priced =
+    product.stock === 'in_stock'
+      ? [{ label: 'Price', testId: 'product-price', text: `$${product.price.toFixed(2)}` }]
+      : [];
+  return [
+    ...priced,
+    { label: 'Availability', testId: 'product-stock', text: STOCK_LABELS[product.stock] },
+  ];
+}
+
+/**
  * An out-of-stock product renders its availability and no price at all. Real
  * storefronts do this, and it makes an extractor that assumes a price is always
  * present fail loudly instead of recording the last one it saw.
  */
-function renderProduct(product: Product): string {
-  const price =
-    product.stock === 'in_stock'
-      ? [
-          '          <dt class="pd-term">Price</dt>',
-          `          <dd class="pd-value" data-testid="product-price" aria-label="Price">$${product.price.toFixed(2)}</dd>`,
-        ]
-      : [];
+function productPage(product: Product, layout: Layout): PageContent {
+  const rows = facts(product);
+  const valueClass = layout === 'normal' ? 'pd-value' : 'ProductView__val';
+  const termClass = layout === 'normal' ? 'pd-term' : 'ProductView__key';
+  const entries = rows.flatMap((row) => [
+    `          <dt class="${termClass}">${row.label}</dt>`,
+    `          <dd class="${valueClass}" data-testid="${row.testId}" aria-label="${row.label}">${row.text}</dd>`,
+  ]);
 
-  return documentShell({
-    title: product.title,
-    state: NORMAL_STATE,
-    main: [
-      '      <article class="pd-card">',
-      `        <h1 class="pd-title" data-testid="product-title">${escapeHtml(product.title)}</h1>`,
-      '        <dl class="pd-facts">',
-      ...price,
-      '          <dt class="pd-term">Availability</dt>',
-      `          <dd class="pd-value" data-testid="product-stock" aria-label="Availability">${STOCK_LABELS[product.stock]}</dd>`,
-      '        </dl>',
-      '      </article>',
-    ].join('\n'),
-  });
+  const heading = (className: string): string =>
+    `        <h1 class="${className}" data-testid="product-title">${escapeHtml(product.title)}</h1>`;
+
+  const main =
+    layout === 'normal'
+      ? [
+          '      <article class="pd-card">',
+          heading('pd-title'),
+          '        <dl class="pd-facts">',
+          ...entries,
+          '        </dl>',
+          '      </article>',
+        ]
+      : [
+          '      <section class="ProductView" id="pv-root">',
+          '        <div class="ProductView__header">',
+          heading('ProductView__name'),
+          '        </div>',
+          '        <div class="ProductView__body" id="pv-body">',
+          '          <dl class="ProductView__list">',
+          ...entries,
+          '          </dl>',
+          '        </div>',
+          '      </section>',
+        ];
+
+  return { title: product.title, main: main.join('\n') };
 }
 
 export function startFakestoreFixture(
   options: StartFixtureOptions = {},
 ): Promise<FixtureHandle<FakestoreControl>> {
   const products = new Map<string, Product>();
+  const modes = createModeState();
 
   const mount = (app: Express): void => {
+    modes.mount(app);
+
     app.get('/product/:id', (request, response) => {
       const product = products.get(request.params.id);
       if (product === undefined) {
+        // A missing product is gone in every mode. A block that could also hide
+        // a 404 would let a watch confuse "blocked" with "removed", which is
+        // the one distinction these fixtures exist to keep sharp.
         response.status(404).type('text/html').send(notFoundPage('product'));
         return;
       }
-      response.type('text/html').send(renderProduct(product));
+      modes.serve(request, response, (layout) => productPage(product, layout));
     });
 
     app.get('/__test/product/:id', (request, response) => {
@@ -113,6 +148,7 @@ export function startFakestoreFixture(
   };
 
   const buildControl = (request: ControlRequest): FakestoreControl => ({
+    ...buildModeControl(request),
     setProduct: (id, input) => request<Product>('POST', `/__test/product/${id}`, input),
     product: (id) => request<Product>('GET', `/__test/product/${id}`),
   });
