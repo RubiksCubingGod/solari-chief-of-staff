@@ -1,5 +1,10 @@
 import { existsSync, readFileSync } from 'node:fs';
 
+import {
+  ANTHROPIC_KEY_VARIABLE,
+  LIVE_LLM_FLAG,
+  liveLlmSkipReason,
+} from '@chief-of-staff/agent';
 import { ConfigError, loadConfig } from '@chief-of-staff/api';
 import { BOT_TRANSPORTS, BotConfigError, loadBotConfig } from '@chief-of-staff/bot';
 import {
@@ -161,5 +166,18 @@ describe('.env.example', () => {
       expect(example, transport).toContain(transport);
     }
     expect(BOT_TRANSPORTS).toContain(documented['TELEGRAM_TRANSPORT']);
+  });
+
+  it('leaves both halves of the live-LLM opt-in blank', () => {
+    for (const variable of [ANTHROPIC_KEY_VARIABLE, LIVE_LLM_FLAG]) {
+      expect(Object.keys(documented), variable).toContain(variable);
+      // Blank for the reason the Solari pair above are: a key filled in here
+      // would be committed, and a flag filled in here would make every ordinary
+      // `pnpm check` on this machine spend real model credit.
+      expect(documented[variable], variable).toBe('');
+    }
+    // A file that named the variables without saying they cost money would be
+    // documentation that reads as an invitation.
+    expect(liveLlmSkipReason(documented)).toContain(LIVE_LLM_FLAG);
   });
 });

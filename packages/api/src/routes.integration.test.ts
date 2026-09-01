@@ -315,6 +315,95 @@ describe('calendar items', () => {
   });
 });
 
+describe('POST /tasks', () => {
+  it('queues a task the chat loop asked for and reads it back through the list', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/tasks',
+      headers: asOwner(),
+      payload: { kind: 'cancel', input: { what: 'gym', connection: 'fakegym' } },
+    });
+
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({
+      userId: ownerId,
+      kind: 'cancel',
+      input: { what: 'gym', connection: 'fakegym' },
+      // Queued and nothing more: this sprint has no engine, and the row is the
+      // whole of what "I have queued that" is allowed to mean.
+      status: 'queued',
+      // ARCHITECTURE 3.2 tries a playbook before an agentic run, so a caller
+      // that does not say gets the cheaper of the two rather than the general
+      // one.
+      mode: 'playbook',
+      playbookId: null,
+      solariSessionId: null,
+      recordingUrl: null,
+      result: null,
+      finishedAt: null,
+    });
+
+    const listed = await app.inject({ method: 'GET', url: '/tasks', headers: asOwner() });
+    expect(listed.json()).toEqual([created.json()]);
+  });
+
+  it('takes an explicit mode when the caller has one', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/tasks',
+      headers: asOwner(),
+      payload: { kind: 'custom', input: {}, mode: 'agentic' },
+    });
+
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({ mode: 'agentic' });
+  });
+
+  it('refuses every bad field at once and stores nothing', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/tasks',
+      headers: asOwner(),
+      payload: { kind: 'evict', input: 'the gym', mode: 'vibes' },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(code(response.body)).toBe('validation_failed');
+    expect(paths(response.body)).toEqual(['/input', '/kind', '/mode']);
+    await expect(app.db.select().from(tasks)).resolves.toEqual([]);
+  });
+
+  it('refuses a status the caller tried to set rather than silently dropping it', async () => {
+    // The engine owns every status after `queued`. A body that could name one
+    // would let chat mark its own work done.
+    const response = await app.inject({
+      method: 'POST',
+      url: '/tasks',
+      headers: asOwner(),
+      payload: { kind: 'cancel', input: {}, status: 'succeeded' },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(code(response.body)).toBe('validation_failed');
+    await expect(app.db.select().from(tasks)).resolves.toEqual([]);
+  });
+
+  it('refuses an unknown caller before it writes a row', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/tasks',
+      headers: { 'x-user-id': randomUUID() },
+      payload: { kind: 'cancel', input: {} },
+    });
+
+    expect(response.statusCode).toBe(404);
+    // The refusal has to be the caller check rather than a missing route, which
+    // answers 404 too — naming the header is what tells the two apart.
+    expect(response.json<{ error: { message: string } }>().error.message).toContain('x-user-id');
+    await expect(app.db.select().from(tasks)).resolves.toEqual([]);
+  });
+});
+
 describe('GET /tasks', () => {
   it('returns the caller’s tasks newest first and nobody else’s', async () => {
     const [older] = await app.db

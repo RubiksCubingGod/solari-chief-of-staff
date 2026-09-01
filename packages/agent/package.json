@@ -15,5 +15,14 @@
   ],
   "scripts": {
     "build": "tsc --build"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.122.0",
+    "@chief-of-staff/core": "workspace:*",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@chief-of-staff/api": "workspace:*",
+    "@chief-of-staff/db": "workspace:*"
   }
 }
