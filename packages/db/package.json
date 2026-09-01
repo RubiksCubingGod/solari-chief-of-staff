@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Drizzle schema, migrations, and the shared Postgres client.",
+  "description": "Drizzle schema, migrations, the shared Postgres client, and the pg-boss job harness.",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -20,7 +20,8 @@
   "dependencies": {
     "@chief-of-staff/core": "workspace:*",
     "drizzle-orm": "0.45.2",
-    "pg": "8.23.0"
+    "pg": "8.23.0",
+    "pg-boss": "12.29.0"
   },
   "devDependencies": {
     "@testcontainers/postgresql": "12.1.0",
