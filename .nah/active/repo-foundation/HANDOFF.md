@@ -164,6 +164,71 @@ CI — with each task's evidence attributable rather than asserted.
     that `HANDOFF.md` is not one of the planning-digest inputs, so writing here
     does not trigger an automatic replan the way editing `DEFERRED.md` does.
 
+## Hardening round 1 findings — 2026-09-01
+
+Attempt `attempt-ree9056ea56844fe49d9dc78afe6cd3a7`, profile `claude-only`
+(codex is not installed on this machine; see `.nah/config.yaml`). Audited
+consumer-backward across failure paths, composition, testing posture, and
+repository pattern usage. Three findings, each verified against installed
+sources rather than recalled behavior. All three are bounded: they sharpen
+failure behavior inside the accepted outcome and change no seam, so they are
+repair tasks rather than a return to planning.
+
+### H1 · high · `db-pool-unhandled-error-event`
+
+**Surface:** `packages/db/src/client.ts:16`.
+**Claim:** `pg-pool@3.14.0` declares `class Pool extends EventEmitter`
+(`index.js:66`) and its idle listener calls `pool.emit('error', err, client)`
+(`index.js:62`) when a pooled connection fails while idle - a Postgres restart,
+`pg_terminate_backend`, a proxy idle timeout, a failover. An EventEmitter that
+emits `error` with no listener terminates the process. `createDatabase`
+attaches none, and its own doc comment calls it "the one Postgres handle every
+process shares: API routes, workers, and integration tests". One transient
+database blip therefore kills the always-on agent.
+**Proof gap:** no test emits a pool-level error; every integration test opens a
+pool, works, and closes cleanly.
+**Pattern inconsistency:** `packages/db/src/jobs.ts:74` already guards exactly
+this hazard for pg-boss, with a comment explaining that an EventEmitter with no
+error listener terminates the process. Same package, one file apart.
+**Repair:** `pool-error-listener`.
+
+### H2 · high · `jobs-stop-fails-work-in-progress`
+
+**Surface:** `packages/db/src/jobs.ts:130`.
+**Claim:** the harness calls `boss.stop({ close: true, graceful: false })`,
+overriding pg-boss's own default of `graceful = true, timeout = 30000`
+(`pg-boss@12.29.0/dist/index.js:182`). With `graceful: false`, `#doStop` skips
+the drain loop and runs `shutdown()` immediately, which calls
+`manager.failWip()` (`index.js:202,212`) - in-flight jobs are marked failed.
+The default retry policy then re-runs them from the start. For the actions this
+product exists to perform - cancelling a subscription, booking a slot - that is
+a double-execution hazard, and it contradicts the spec invariant that work
+survives the process.
+**Proof gap:** no test calls `stop()` while a handler is still running, so
+nothing distinguishes a drain from a kill.
+**Repair:** `graceful-worker-shutdown`.
+
+### H3 · medium · `no-runnable-process-entry-point`
+
+**Surface:** `packages/api/src/app.ts:31`, `packages/db/src/jobs.ts:140`,
+`package.json` scripts.
+**Claim:** `createApp` and `runWorker` are never called outside tests. There is
+no `main.ts`, no `app.listen`, and no `start` or `dev` script.
+`AppConfig.host` and `AppConfig.port` are parsed, validated, documented in
+`.env.example`, and read by no code at all. `runWorker`'s own doc comment calls
+it "the worker process entry point" and the `job-scheduling-harness` spec says
+the harness is "started by the worker process entry point" - but no process
+starts it.
+**Proof gap:** nothing boots either surface the way a deployment would.
+**Repair:** `process-entry-points`.
+
+### Not findings
+
+Four uncovered branches remain (`jobs.ts:63,108`, `caller.ts:28`,
+`watches.ts:66`) - a defaulted interval, an unreachable defensive throw, an
+array-valued header, and an absent extractor. Branch coverage is 95.87% against
+a 90 floor. None is a behavior gap and none warrants a task.
+
 ## Open follow-ups
 
 - `unresolved-design-language` fires on `workspace-toolchain` and
