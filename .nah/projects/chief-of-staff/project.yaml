@@ -74,13 +74,14 @@ sprints:
     alias: s1c
     owner: RubiksCubingGod
     wall_hours_estimate: 8
-    estimated_task_count: 4
+    estimated_task_count: 3
     average_task_agent_hours: 2
     release:
       outcome: A BrowserProvider seam with LocalProvider (plain Playwright) and SolariProvider
-        (profiles, recording, stealth) implementations plus withBrowser() close/kill hygiene - CI
-        proves engines run on LocalProvider, and a tagged live smoke opens a page through a real
-        Solari browser and exits cleanly.
+        (profiles, recording, stealth) implementations plus withBrowser() session hygiene
+        (browser.close then solari.close, self-tracked sessions) - CI proves one contract suite on
+        LocalProvider, and a secrets-gated live smoke opens a page through a real Solari browser,
+        retrieves the recording, and exits with zero leaked sessions.
       kind: tooling
       change_sets:
         - repository: chief-of-staff
