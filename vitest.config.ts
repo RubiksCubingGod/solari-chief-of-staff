@@ -98,10 +98,14 @@ export default defineConfig({
       include: ['packages/*/src/**/*.ts'],
       exclude: [
         ...TEST_FILE_GLOBS,
-        // The only file that needs a container runtime. It cannot run on a
+        // The two ends of the test-database ladder, each of which only one kind
+        // of machine executes. The container adapter cannot run on a
         // workstation without Docker, and on CI it is the path every
-        // integration test already takes.
+        // integration test already takes; the embedded cluster is the exact
+        // opposite, reached only where no container runtime answered. Their
+        // selection logic lives in `postgres.ts`, which is covered.
         'packages/db/src/testing/testcontainers.ts',
+        'packages/db/src/testing/embedded.ts',
       ],
       thresholds: coverageThresholds,
     },

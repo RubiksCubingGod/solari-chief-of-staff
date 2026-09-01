@@ -173,9 +173,16 @@ export const messages = pgTable(
   'messages',
   {
     id: primaryKeyColumn(),
-    userId: uuid('user_id')
-      .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+    // Null until the chat it arrived on is bound to a user. The bot transcribes
+    // every message it handles, and the first thing an unbound stranger says
+    // arrives before there is any user to attribute it to; refusing to store it
+    // would leave the one exchange most worth reading — how someone failed to
+    // bind — as the only one absent from the transcript.
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+    // The channel-level address the row belongs to, which exists for every
+    // message whether or not a user does. It is what an unattributed row is
+    // read back by, and what binding later resolves.
+    chatId: text('chat_id'),
     direction: messageDirection('direction').notNull(),
     channel: messageChannel('channel').notNull(),
     text: text('text').notNull(),
@@ -185,7 +192,10 @@ export const messages = pgTable(
     watchId: uuid('watch_id').references(() => watches.id, { onDelete: 'set null' }),
     ts: timestampColumn('ts').notNull().defaultNow(),
   },
-  (table) => [index('messages_user_id_ts_idx').on(table.userId, table.ts)],
+  (table) => [
+    index('messages_user_id_ts_idx').on(table.userId, table.ts),
+    index('messages_chat_id_ts_idx').on(table.chatId, table.ts),
+  ],
 );
 
 /** Every table in the section 5 model, in dependency order. */

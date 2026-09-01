@@ -105,13 +105,35 @@ describe('the section 5 schema', () => {
     expect(indexedColumns(taskEvents)).toEqual({
       task_events_task_id_ts_idx: ['task_id', 'ts'],
     });
-    expect(indexedColumns(messages)).toEqual({ messages_user_id_ts_idx: ['user_id', 'ts'] });
+    expect(indexedColumns(messages)).toEqual({
+      messages_user_id_ts_idx: ['user_id', 'ts'],
+      // A chat is readable before it is anybody's: an unbound stranger's
+      // messages have no user_id to be found by, and reading that exchange back
+      // is the whole point of transcribing it.
+      messages_chat_id_ts_idx: ['chat_id', 'ts'],
+    });
     expect(indexedColumns(tasks)).toEqual({
       tasks_user_id_created_at_idx: ['user_id', 'created_at'],
     });
     expect(indexedColumns(calendarItems)).toEqual({
       calendar_items_user_id_idx: ['user_id'],
     });
+  });
+
+  it('transcribes a chat that belongs to nobody yet', () => {
+    const columns = Object.fromEntries(
+      getTableConfig(messages).columns.map((column) => [column.name, column]),
+    );
+
+    // The two halves of one decision. A stranger's first message arrives before
+    // any user exists to attribute it to, so `user_id` cannot be required; and
+    // `chat_id` is then the only handle that exchange has, so it has to be
+    // stored rather than inferred from a row that is not there.
+    expect(columns['user_id']?.notNull).toBe(false);
+    expect(columns['chat_id']).toBeDefined();
+    // The text itself stays required: a transcript row that records nothing is
+    // worse than no row, because it looks like evidence.
+    expect(columns['text']?.notNull).toBe(true);
   });
 
   it('allows one stored login per site per user', () => {

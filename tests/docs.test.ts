@@ -1,7 +1,12 @@
 import { existsSync, readFileSync } from 'node:fs';
 
 import { ConfigError, loadConfig } from '@chief-of-staff/api';
-import { TEST_DATABASE_URL_VARIABLE } from '@chief-of-staff/db/testing';
+import { BOT_TRANSPORTS, BotConfigError, loadBotConfig } from '@chief-of-staff/bot';
+import {
+  TEST_DATABASE_URL_VARIABLE,
+  TEST_POSTGRES_STARTERS,
+  TEST_POSTGRES_STARTER_VARIABLE,
+} from '@chief-of-staff/db/testing';
 import { describe, expect, it } from 'vitest';
 
 /**
@@ -114,5 +119,47 @@ describe('.env.example', () => {
     // Blank: the default path is a throwaway container, and a value left here
     // would silently redirect every integration test at a shared server.
     expect(documented[TEST_DATABASE_URL_VARIABLE]).toBe('');
+  });
+
+  it('names the starter pin, blank, alongside the rungs it can select', () => {
+    expect(Object.keys(documented)).toContain(TEST_POSTGRES_STARTER_VARIABLE);
+    // Blank for the same reason: a value here would pin every run on this
+    // machine to one rung and hide the ladder the next machine depends on.
+    expect(documented[TEST_POSTGRES_STARTER_VARIABLE]).toBe('');
+    for (const rung of TEST_POSTGRES_STARTERS) {
+      expect(example, rung).toContain(`\`${rung}\``);
+    }
+  });
+
+  it('is enough on its own to configure the bot, once a token is filled in', () => {
+    // The token is the one value in this file that cannot be documented, so a
+    // stand-in is supplied here and the example leaves it blank.
+    const token = '123456:example';
+    const configured = loadBotConfig({ ...documented, TELEGRAM_BOT_TOKEN: token });
+    const defaults = loadBotConfig({
+      TELEGRAM_BOT_TOKEN: token,
+      DATABASE_URL: documented['DATABASE_URL'] ?? '',
+    });
+
+    expect(configured.databaseUrl).toBe(documented['DATABASE_URL']);
+    // The rate-limit numbers written above are the loader's own defaults.
+    // Changing one in code and not the other fails here, rather than leaving a
+    // reader to configure the bot from a file that quietly disagrees with it.
+    expect(configured).toEqual(defaults);
+  });
+
+  it('leaves the bot token blank, because it is the one secret here', () => {
+    expect(Object.keys(documented)).toContain('TELEGRAM_BOT_TOKEN');
+    expect(documented['TELEGRAM_BOT_TOKEN']).toBe('');
+    // Blank is not merely conventional: the bot refuses to start without it, so
+    // a copied `.env` cannot accidentally run as somebody else's bot.
+    expect(() => loadBotConfig(documented)).toThrow(BotConfigError);
+  });
+
+  it('names every transport the bot can be switched between', () => {
+    for (const transport of BOT_TRANSPORTS) {
+      expect(example, transport).toContain(transport);
+    }
+    expect(BOT_TRANSPORTS).toContain(documented['TELEGRAM_TRANSPORT']);
   });
 });
