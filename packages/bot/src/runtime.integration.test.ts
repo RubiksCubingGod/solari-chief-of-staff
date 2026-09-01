@@ -1,7 +1,7 @@
 import { createDatabase, messages, runMigrations, users, type Database } from '@chief-of-staff/db';
 import { startTestPostgres, type TestPostgres } from '@chief-of-staff/db/testing';
 import { asc } from 'drizzle-orm';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { loadBotConfig, type BotConfig } from './config.js';
 import { HOW_TO_BIND, RATE_LIMIT_NOTICE } from './replies.js';
@@ -119,6 +119,31 @@ describe('transport configuration', () => {
 
     expect(transport.callsTo('setWebhook')).toEqual([]);
     expect(transport.callsTo('getUpdates').length).toBeGreaterThan(0);
+  });
+
+  it('reports a long poll that dies after the bot is already running', async () => {
+    const failures: unknown[] = [];
+    const transport = createTestTransport();
+    transport.failPolling(401, 'Unauthorized');
+    const runtime = createBotRuntime({
+      config: configFor(),
+      db: database.db,
+      transformer: transport.transformer,
+      botInfo: TEST_BOT_INFO,
+      chatLoop,
+      onPollingFailure: (error) => failures.push(error),
+    });
+    started.push(runtime);
+
+    // `start()` resolves as soon as the poll is running, so it cannot report
+    // this: a revoked token is discovered later, and from then on the process
+    // is up, healthy by every other measure, and deaf. Somebody has to be told.
+    await runtime.start();
+    await vi.waitFor(() => {
+      expect(failures).toHaveLength(1);
+    });
+
+    expect(String(failures[0])).toContain('Unauthorized');
   });
 
   it('registers the webhook when configured to, and never polls', async () => {

@@ -51,6 +51,7 @@ export {
 } from './routing.js';
 export {
   createBotRuntime,
+  logPollingFailure,
   type BotRuntime,
   type BotRuntimeOptions,
 } from './runtime.js';

@@ -76,6 +76,14 @@ export interface TestTransport {
    * the script succeeds, so a test scripts only the failures it is about.
    */
   scriptSends(...outcomes: readonly SendOutcome[]): void;
+  /**
+   * Makes every `getUpdates` answer with a Telegram refusal instead of an empty
+   * batch. That is how a long poll ends for good — a revoked token, a webhook
+   * still registered, a second process holding the same bot — and it is the one
+   * failure a polling runtime cannot notice by itself, because it happens long
+   * after `start()` has returned.
+   */
+  failPolling(errorCode: number, description: string): void;
   clear(): void;
 }
 
@@ -109,6 +117,7 @@ export function createTestTransport(options: TestTransportOptions = {}): TestTra
   const calls: RecordedCall[] = [];
   const delivered: SentMessage[] = [];
   const script: SendOutcome[] = [];
+  let pollingFailure: { errorCode: number; description: string } | undefined;
 
   const stub: StubTransformer = async (_prev, method, payload, signal) => {
     calls.push({ method, payload: { ...payload } });
@@ -119,6 +128,13 @@ export function createTestTransport(options: TestTransportOptions = {}): TestTra
         return { ok: false, error_code: outcome.errorCode, description: outcome.description };
       }
       delivered.push({ chatId: String(payload['chat_id']), text: String(payload['text']) });
+    }
+    if (method === 'getUpdates' && pollingFailure !== undefined) {
+      return {
+        ok: false,
+        error_code: pollingFailure.errorCode,
+        description: pollingFailure.description,
+      };
     }
     return { ok: true, result: await resultFor(method, longPollMs, signal) };
   };
@@ -136,10 +152,14 @@ export function createTestTransport(options: TestTransportOptions = {}): TestTra
     scriptSends: (...outcomes: readonly SendOutcome[]) => {
       script.push(...outcomes);
     },
+    failPolling: (errorCode: number, description: string) => {
+      pollingFailure = { errorCode, description };
+    },
     clear: () => {
       calls.length = 0;
       delivered.length = 0;
       script.length = 0;
+      pollingFailure = undefined;
     },
   };
 }

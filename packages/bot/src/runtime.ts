@@ -90,6 +90,31 @@ export interface BotRuntimeOptions {
   readonly sendRetry?: SendRetryPolicy;
   /** Injected so delivery backoff is provable without waiting through it. */
   readonly wait?: (ms: number) => Promise<void>;
+  /**
+   * Where a long poll that dies gets reported. Defaults to `logPollingFailure`;
+   * a process that has somewhere better to send an outage passes that instead.
+   */
+  readonly onPollingFailure?: (error: unknown) => void;
+}
+
+/**
+ * The default report for a long poll that stopped.
+ *
+ * This failure is the one nobody is awaiting: polling starts and `start()`
+ * returns, so when the token is revoked, a webhook gets registered underneath
+ * us, or a second process claims the same bot, there is no caller left to
+ * reject and no request left to fail. Unreported it is the worst kind of
+ * outage — the process stays up, healthy by every other measure, and simply
+ * stops hearing anyone. Shaped like `logPoolError` in `@chief-of-staff/db`,
+ * which exists for exactly the same reason on the other side of the system.
+ */
+export function logPollingFailure(
+  error: unknown,
+  write: (line: string) => void = (line) => {
+    console.error(line);
+  },
+): void {
+  write(`[bot] long polling stopped: ${error instanceof Error ? error.message : String(error)}`);
 }
 
 /**
@@ -108,6 +133,7 @@ export function createBotRuntime(options: BotRuntimeOptions): BotRuntime {
       ? new Bot(config.token)
       : new Bot(config.token, { botInfo: options.botInfo });
   const now = options.now ?? Date.now;
+  const reportPollingFailure = options.onPollingFailure ?? logPollingFailure;
   const limiter = createRateLimiter(config.rateLimit, now);
 
   // Order matters twice over, in opposite directions, because grammY composes
@@ -173,12 +199,12 @@ export function createBotRuntime(options: BotRuntimeOptions): BotRuntime {
         return;
       }
       // `bot.start()` resolves only once the bot is stopped, so awaiting it
-      // here would mean start() never returns. The rejection is still routed:
-      // an unhandled one would take the process down with no explanation.
+      // here would mean start() never returns. That leaves its rejection with
+      // nobody to reject to, which is why it is handed to the reporter: it is
+      // the only news that the poll died, and it arrives long after this
+      // method answered that the bot was up.
       await bot.init();
-      void bot.start().catch((error: unknown) => {
-        bot.catch?.(error as never);
-      });
+      void bot.start().catch(reportPollingFailure);
     },
 
     async stop() {
