@@ -364,6 +364,22 @@ adherence re-checked after the repairs, and receipt integrity.
   `kill('SIGTERM')` there terminates the process outright rather than
   delivering a signal, so the assertion would say nothing about the code. CI is
   Linux and runs them.
+
+  **Corrected after closure - 2026-09-01.** CI ran these for the first time and
+  the `pnpm start` one failed. Both entry scripts announced readiness before
+  registering the signal handler, so a SIGTERM arriving in that window
+  terminated the process by default disposition, abandoning the in-flight work
+  the drain exists to protect. The worker's identical assertion passed in the
+  same run, which is what a race looks like rather than a logic error. Fixed in
+  `2d1b0bb` by registering the handler first. The same run also failed
+  `postgres-harness.integration.test.ts`, which asserted distinct database
+  *names* - true only on the `TEST_DATABASE_URL` path, not with a container per
+  caller; the same commit compares connection strings instead.
+
+  This item was carried as a skipped-proof finding when hardening recorded
+  `passed`. It was a live defect, and that assurance result was reached on
+  evidence that could not execute the path. Neither failure was reachable from
+  this machine: Windows delivers no SIGTERM and there is no container runtime.
 - The `graceful-shutdown-gate` receipt is red, and the failure is entirely
   outside this sprint: a concurrent session's `fixtures/` package was mid-write
   when the gate ran, first failing `tsc -p tsconfig.test.json` on a module it
