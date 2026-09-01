@@ -1,4 +1,13 @@
 export {
+  type Booking,
+  type BookingRefusal,
+  type FailureMode,
+  type FakedmvControl,
+  type Slot,
+  type SlotInput,
+  startFakedmvFixture,
+} from './fakedmv.js';
+export {
   type Article,
   type ArticleInput,
   type FakenewsControl,
