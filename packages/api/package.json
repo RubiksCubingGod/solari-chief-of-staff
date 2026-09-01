@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@chief-of-staff/core": "workspace:*",
-    "@chief-of-staff/db": "workspace:*"
+    "@chief-of-staff/db": "workspace:*",
+    "fastify": "5.12.1"
   }
 }
