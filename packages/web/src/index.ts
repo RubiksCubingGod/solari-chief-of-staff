@@ -39,5 +39,7 @@ export {
   REQUEST_LINK_PATH,
   SESSION_COOKIE_NAME,
   readSession,
+  readSessionReading,
   type Session,
+  type SessionReading,
 } from './auth/session';

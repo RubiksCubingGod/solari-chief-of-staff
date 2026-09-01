@@ -1,12 +1,7 @@
 import type { WatchStatus } from '@chief-of-staff/core';
 
-import {
-  ApiError,
-  ApiUnreachableError,
-  type ApiClient,
-  type Observation,
-  type Watch,
-} from '../api-client';
+import { type ApiClient, type Observation, type Watch } from '../api-client';
+import { describeRefusal } from '../api-refusal';
 
 /**
  * Everything the watches page draws, worked out before any of it is drawn.
@@ -109,15 +104,3 @@ function renderReading(value: unknown): string | undefined {
   return JSON.stringify(value);
 }
 
-/**
- * What to tell the reader, for the two failures that are the API talking.
- *
- * Anything else is rethrown. A page state is for what the server said; a defect
- * in this process is not that, and folding it into a tidy banner would hide the
- * stack that says where it is.
- */
-function describeRefusal(error: unknown): string {
-  if (error instanceof ApiUnreachableError) return 'the API did not answer';
-  if (error instanceof ApiError) return error.message;
-  throw error;
-}

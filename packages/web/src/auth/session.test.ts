@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError, ApiUnreachableError } from '../api-client';
-import { REQUEST_LINK_PATH, SESSION_COOKIE_NAME, readSession } from './session';
+import {
+  REQUEST_LINK_PATH,
+  SESSION_COOKIE_NAME,
+  readSession,
+  readSessionReading,
+} from './session';
 
 /**
  * The guard's one decision, taken apart.
@@ -109,5 +114,44 @@ describe('readSession', () => {
     // that missed one of them would be a redirect loop.
     expect(REQUEST_LINK_PATH).toBe('/login');
     expect(SESSION_COOKIE_NAME).toBe('cos_session');
+  });
+});
+
+describe('readSessionReading', () => {
+  it('names the account when the API recognised the cookie', async () => {
+    stubApi(() => json(USER));
+
+    await expect(readSessionReading(SESSION)).resolves.toEqual({
+      state: 'signed-in',
+      session: USER,
+    });
+  });
+
+  it('reports a visitor with no cookie as signed out', async () => {
+    await expect(readSessionReading(undefined)).resolves.toEqual({ state: 'signed-out' });
+  });
+
+  it('reports a cookie the API refused as signed out', async () => {
+    stubApi(() => json({ error: { code: 'unauthorized', message: 'no session' } }, 401));
+
+    await expect(readSessionReading(SESSION)).resolves.toEqual({ state: 'signed-out' });
+  });
+
+  it('separates an API that did not answer from a visitor who is signed out', async () => {
+    vi.stubEnv('API_BASE_URL', API_BASE_URL);
+    vi.stubGlobal('fetch', () => Promise.reject(new TypeError('fetch failed')));
+
+    // The distinction this type exists for. Both of the answers above leave the
+    // caller without a session, and only this one leaves it without a fact.
+    await expect(readSessionReading(SESSION)).resolves.toEqual({ state: 'unverifiable' });
+  });
+
+  it('still lets a reachable API failure through, because that is a defect', async () => {
+    stubApi(() => json({ error: { code: 'internal_error', message: 'boom' } }, 500));
+
+    // An API answering 500 is running, and something in it is broken. Folding
+    // that into `unverifiable` would quietly wave requests past the guard for a
+    // reason nobody had looked at.
+    await expect(readSessionReading(SESSION)).rejects.toBeInstanceOf(ApiError);
   });
 });

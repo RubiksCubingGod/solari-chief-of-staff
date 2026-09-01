@@ -1,5 +1,6 @@
 import {
   ApiError,
+  ApiUnreachableError,
   createApiClient,
   sessionCookieCredential,
   type AuthenticatedUser,
@@ -74,6 +75,40 @@ export async function readSession(cookieHeader: string | undefined): Promise<Ses
     return await client.session();
   } catch (error: unknown) {
     if (error instanceof ApiError && error.status === 401) return undefined;
+    throw error;
+  }
+}
+
+/**
+ * What a request lets the dashboard know about who is asking.
+ *
+ * Three answers rather than two, because "no session" and "no answer" are
+ * different facts and the callers want different things done with them. The
+ * middleware turns the first into a redirect and the second into a shrug; the
+ * layout draws a signed-out shell for both, but only after the difference has
+ * stopped being an exception it has to catch.
+ */
+export type SessionReading =
+  | { readonly state: 'signed-in'; readonly session: Session }
+  | { readonly state: 'signed-out' }
+  | { readonly state: 'unverifiable' };
+
+/**
+ * `readSession`, with an unreachable API given a name instead of a stack.
+ *
+ * Only an unreachable API becomes `unverifiable`. A reachable API answering
+ * with a failure has said something, and what it said is a defect worth the
+ * legible 500 `readSession` already produces; an API that is not answering at
+ * all is a condition every page in this package already knows how to draw.
+ */
+export async function readSessionReading(
+  cookieHeader: string | undefined,
+): Promise<SessionReading> {
+  try {
+    const session = await readSession(cookieHeader);
+    return session === undefined ? { state: 'signed-out' } : { state: 'signed-in', session };
+  } catch (error: unknown) {
+    if (error instanceof ApiUnreachableError) return { state: 'unverifiable' };
     throw error;
   }
 }

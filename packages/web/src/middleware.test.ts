@@ -85,6 +85,20 @@ describe('the dashboard middleware', () => {
     );
   });
 
+  it('lets a request past when the API cannot be asked, rather than looping it', async () => {
+    vi.stubEnv('API_BASE_URL', API_BASE_URL);
+    vi.stubGlobal('fetch', () => Promise.reject(new TypeError('fetch failed')));
+
+    const response = await middleware(request('/watches', SESSION));
+
+    // The page behind this guard renders "the API did not answer". A redirect
+    // would replace that sentence with the sign-in page, which needs the same
+    // API to send a link - a reader would be bounced to a dead end and told
+    // they were signed out, when what happened is that a server is down.
+    expect(response.status).toBe(200);
+    expect(response.headers.get('location')).toBeNull();
+  });
+
   it('claims every dashboard path, including ones no task has built yet', () => {
     // The default is "guarded". A section added after this task is covered by
     // this matcher on the day it is created, without anybody remembering to say

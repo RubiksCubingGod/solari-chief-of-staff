@@ -1,8 +1,22 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-import type { WatchStatus } from '@chief-of-staff/core';
-import { observations, runMigrations, users, watches } from '@chief-of-staff/db';
+import type {
+  CalendarItemKind,
+  CalendarItemStatus,
+  TaskKind,
+  TaskMode,
+  TaskStatus,
+  WatchStatus,
+} from '@chief-of-staff/core';
+import {
+  calendarItems,
+  observations,
+  runMigrations,
+  tasks,
+  users,
+  watches,
+} from '@chief-of-staff/db';
 import { startTestPostgres, type TestPostgres } from '@chief-of-staff/db/testing';
 import type { FastifyInstance } from 'fastify';
 
@@ -53,16 +67,78 @@ export interface SeededWatch {
   readonly series: readonly number[];
 }
 
+
+/**
+ * One calendar row to plant.
+ *
+ * The dates are the point. `GET /calendar-items` returns them ordered by name,
+ * which is not the order a calendar is read in, so every test about ordering is
+ * a test about what the page does with these two columns rather than what the
+ * API handed it.
+ */
+export interface SeedCalendarItem {
+  /** What the page prints, so tests assert on it. */
+  readonly name: string;
+  /** Defaults to `subscription`, the kind that renews rather than expires. */
+  readonly kind?: CalendarItemKind;
+  /** `YYYY-MM-DD`. A subscription's next charge. */
+  readonly renewOn?: string;
+  /** `YYYY-MM-DD`. The last day a deadline can still be acted on. */
+  readonly cancelBy?: string;
+  readonly amountCents?: number;
+  readonly status?: CalendarItemStatus;
+}
+
+/** One planted calendar row, as the test now knows it. */
+export interface SeededCalendarItem {
+  readonly id: string;
+  readonly name: string;
+  readonly kind: CalendarItemKind;
+  readonly renewOn: string | undefined;
+  readonly cancelBy: string | undefined;
+  readonly amountCents: number | undefined;
+  readonly status: CalendarItemStatus;
+}
+
+/**
+ * One task to plant, in the order it happened.
+ *
+ * Position in the array is the history: each row is created a minute after the
+ * one before it, so `oldest first` here comes back `newest first` from the API,
+ * and a page that reversed nothing is distinguishable from one that did.
+ */
+export interface SeedTask {
+  readonly kind?: TaskKind;
+  readonly status?: TaskStatus;
+  readonly mode?: TaskMode;
+  readonly input?: unknown;
+}
+
+/** One planted task, as the test now knows it. */
+export interface SeededTask {
+  readonly id: string;
+  readonly kind: TaskKind;
+  readonly status: TaskStatus;
+  readonly mode: TaskMode;
+  /** ISO, anchored to the seed epoch, so an order assertion cannot be a race. */
+  readonly createdAt: string;
+}
+
 /** One planted account and everything planted under it. */
 export interface SeededAccount {
   readonly userId: string;
   readonly email: string;
   readonly watches: readonly SeededWatch[];
+  readonly calendarItems: readonly SeededCalendarItem[];
+  readonly tasks: readonly SeededTask[];
 }
 
 export interface SeedAccountOptions {
   readonly email: string;
   readonly watches?: readonly SeedWatch[];
+  readonly calendarItems?: readonly SeedCalendarItem[];
+  /** Oldest first; the API returns them newest first. */
+  readonly tasks?: readonly SeedTask[];
 }
 
 export interface AuthStack {
@@ -264,5 +340,68 @@ async function seedAccountOn(
     planted.push({ id: row.id, url: seed.url, status, series });
   }
 
-  return { userId: account.id, email: options.email, watches: planted };
+  const plantedCalendarItems: SeededCalendarItem[] = [];
+  for (const seed of options.calendarItems ?? []) {
+    const kind = seed.kind ?? 'subscription';
+    const status = seed.status ?? 'active';
+    const [row] = await app.db
+      .insert(calendarItems)
+      .values({
+        userId: account.id,
+        kind,
+        name: seed.name,
+        amountCents: seed.amountCents ?? null,
+        renewOn: seed.renewOn ?? null,
+        cancelBy: seed.cancelBy ?? null,
+        action: null,
+        status,
+      })
+      .returning({ id: calendarItems.id });
+    if (row === undefined) throw new Error(`the calendar item ${seed.name} was not created`);
+
+    plantedCalendarItems.push({
+      id: row.id,
+      name: seed.name,
+      kind,
+      renewOn: seed.renewOn,
+      cancelBy: seed.cancelBy,
+      amountCents: seed.amountCents,
+      status,
+    });
+  }
+
+  const plantedTasks: SeededTask[] = [];
+  const taskSeeds = options.tasks ?? [];
+  for (const [index, seed] of taskSeeds.entries()) {
+    const kind = seed.kind ?? 'cancel';
+    const status = seed.status ?? 'queued';
+    const mode = seed.mode ?? 'playbook';
+    // Anchored rather than left to `defaultNow()`: the history is read newest
+    // first, and two rows a fast machine writes inside the same millisecond
+    // would come back in whichever order the database felt like.
+    const createdAt = new Date(SEED_EPOCH + index * SEED_INTERVAL_MS);
+
+    const [row] = await app.db
+      .insert(tasks)
+      .values({
+        userId: account.id,
+        kind,
+        input: seed.input ?? { note: seed.kind ?? 'cancel' },
+        status,
+        mode,
+        createdAt,
+      })
+      .returning({ id: tasks.id });
+    if (row === undefined) throw new Error(`the task at position ${String(index)} was not created`);
+
+    plantedTasks.push({ id: row.id, kind, status, mode, createdAt: createdAt.toISOString() });
+  }
+
+  return {
+    userId: account.id,
+    email: options.email,
+    watches: planted,
+    calendarItems: plantedCalendarItems,
+    tasks: plantedTasks,
+  };
 }

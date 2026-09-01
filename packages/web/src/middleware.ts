@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
-import { REQUEST_LINK_PATH, readSession } from './auth/session';
+import { REQUEST_LINK_PATH, readSessionReading } from './auth/session';
 
 /**
  * The guard in front of the dashboard.
@@ -34,8 +34,24 @@ export const config = {
 };
 
 export async function middleware(request: NextRequest): Promise<NextResponse> {
-  const session = await readSession(request.headers.get('cookie') ?? undefined);
-  if (session !== undefined) return NextResponse.next();
+  const reading = await readSessionReading(request.headers.get('cookie') ?? undefined);
+
+  if (reading.state === 'signed-in') return NextResponse.next();
+
+  // An API that is not answering has not said this visitor is signed out, and
+  // the guard has nothing to decide with. It lets the request past rather than
+  // bouncing it, because the sign-in page it would bounce to needs that same
+  // API to send a link - a redirect here is a loop that ends on a page which
+  // cannot work either, and it tells a signed-in reader they have been signed
+  // out when what actually happened is that a server is down.
+  //
+  // Letting it past discloses nothing. Nothing in this package reads the
+  // database; every fact on every page arrives through the API that is not
+  // answering, and each of those reads is authenticated by the API itself
+  // rather than by this guard. A browser waved through during an outage
+  // reaches pages that can only tell it the API did not answer - which is the
+  // true thing to say - and is checked again on the next request.
+  if (reading.state === 'unverifiable') return NextResponse.next();
 
   // A redirect rather than a 401 body: the visitor is a browser following a
   // link, and the useful thing to hand it is the page that can fix the problem.

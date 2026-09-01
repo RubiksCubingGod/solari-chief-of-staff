@@ -1,3 +1,4 @@
+import { availableParallelism } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 import { defineConfig } from 'vitest/config';
@@ -74,12 +75,31 @@ export const coverageThresholds = {
   },
 };
 
+/**
+ * How many test files may be in flight at once.
+ *
+ * Fewer than there are cores, on purpose. What bounds this run is memory rather
+ * than CPU: an integration file here can be a Postgres container, or a Next dev
+ * server compiling a route with a Chromium beside it, and there are enough of
+ * both that one process per core asks for more memory than a developer
+ * workstation running an editor and a browser has left. Oversubscribed, the
+ * failures do not look like memory - they look like a container that took more
+ * than two minutes to accept connections and an ESLint run that took three,
+ * which is to say like flakes in whichever suites happened to be scheduled
+ * together.
+ *
+ * Capped rather than fixed, so a smaller machine still gets one process per
+ * core and does not end up with eight of them fighting over four.
+ */
+const MAX_CONCURRENT_TEST_FILES = Math.min(8, availableParallelism());
+
 const TEST_FILE_GLOBS = ['**/*.test.ts', '**/*.integration.test.ts'];
 const ALWAYS_EXCLUDED = ['**/node_modules/**', '**/dist/**', '**/coverage/**'];
 
 export default defineConfig({
   resolve: { alias: sourceAliases },
   test: {
+    maxWorkers: MAX_CONCURRENT_TEST_FILES,
     projects: [
       {
         extends: true,

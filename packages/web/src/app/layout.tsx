@@ -3,7 +3,7 @@ import { headers } from 'next/headers';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 
-import { readSession } from '../auth/session';
+import { readSessionReading } from '../auth/session';
 
 /**
  * The shell every page lands in. The three sections below are built by the
@@ -28,7 +28,14 @@ export default async function RootLayout({ children }: { readonly children: Reac
   // guard decides whether a page may be drawn, this decides what the shell says
   // about who is drawing it. The sign-in page shares this layout and has no
   // session, so both shapes have to render.
-  const session = await readSession((await headers()).get('cookie') ?? undefined);
+  //
+  // An unreachable API draws the signed-out shell. The shell is the frame the
+  // page's own error state is drawn inside, and a layout that threw would
+  // replace that error state with a blank 500 - the reader would learn less
+  // about the outage from the whole dashboard than one banner would have told
+  // them. What is lost is the name in the corner, which nobody visits for.
+  const reading = await readSessionReading((await headers()).get('cookie') ?? undefined);
+  const session = reading.state === 'signed-in' ? reading.session : undefined;
 
   return (
     <html lang="en">

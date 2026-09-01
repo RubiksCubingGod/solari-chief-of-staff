@@ -649,3 +649,150 @@ Two conventions from the watches page are worth copying rather than reinventing:
   be made to refuse on cue without breaking the run it is in the middle of, so the outage, the
   refusal, and the one-row-failed-while-the-rest-are-fine cases live in `view-model.test.ts`. The
   e2e claim says so explicitly rather than implying the browser proved them.
+
+## The outage the sprint kept promising to show was a 500 nobody could see
+
+The task's `done_when` asked for "a simulated API failure renders the visible error state", and
+every page in this package had been built to do exactly that: `describeRefusal` turns an
+unreachable API into `the API did not answer`, and each loader returns it as a page state rather
+than throwing. The `calendar-tasks-pages` red proved the loaders were the only thing missing -
+and, incidentally, that none of that machinery could ever run.
+
+The red log said it in one line:
+
+```
+[browser] Uncaught ApiUnreachableError: The API at http://127.0.0.1:50131/auth/session did not answer.
+AssertionError: /watches said: : expected '' to contain 'Your watches could not be loaded'
+```
+
+`/watches` rendered nothing at all. `readSession` swallows only `ApiError` with status 401 and
+rethrows everything else, and both of its callers - `middleware.ts` and `app/layout.tsx` - ran
+before any page did. During an outage the guard threw, the shell threw, and the dashboard
+answered 500 to every guarded path. The banner three tasks had built was unreachable code.
+
+The comment on `readSession` had reasoned this out and got it right for the world it was written
+in: an API that is unreachable "has not said this visitor is signed out - it has said nothing",
+and turning that into a redirect would send everybody to a sign-in page that cannot work either.
+True, and it is still true. What changed underneath it is that the pages now have somewhere to
+put the fact. A legible 500 was the best available answer when nothing could draw an outage; it
+stopped being the best answer once every page could.
+
+So `readSession` keeps its contract - it answers who is asking, or it throws - and a second
+reading sits beside it:
+
+```ts
+export type SessionReading =
+  | { readonly state: 'signed-in'; readonly session: Session }
+  | { readonly state: 'signed-out' }
+  | { readonly state: 'unverifiable' };
+```
+
+Three answers rather than two, because "no session" and "no answer" are different facts and the
+two callers want different things done with them. The middleware redirects the first and lets
+the second past. The layout draws the signed-out shell for both.
+
+**Letting an unverifiable request past is the part worth defending, and the defence is
+structural rather than a judgement call.** Nothing in `packages/web` reads the database - the
+lint boundary in `api-boundary.test.ts` enforces that, and it is the reason that test exists.
+Every fact on every page arrives through the API, and the API authenticates each of those reads
+itself; this guard has never been the thing keeping one account's rows away from another, it is
+the thing that sends a signed-out browser somewhere useful. A browser waved through during an
+outage reaches pages that can only tell it the API did not answer, and is checked again on the
+next request. The alternative - redirecting - bounces a signed-in reader to a sign-in page that
+needs the same dead API to mail them a link, and tells them they are signed out when what
+happened is that a server is down.
+
+Only `ApiUnreachableError` becomes `unverifiable`. An API answering 500 is running, and
+something in it is broken; that is a defect worth the legible 500 `readSession` already
+produces, and folding it in here would wave requests past the guard for a reason nobody had
+looked at. `session.test.ts` pins both halves of that line.
+
+Two things follow for later sprints:
+
+- **s5's run detail inherits this for free.** It lands behind the same middleware and inside the
+  same layout, so it needs no outage handling of its own beyond what every page already does:
+  return the refusal as a page state.
+- **A page that ever renders account data without asking the API would break the argument
+  above.** There is no such page today and the lint boundary makes one hard to write by
+  accident, but if one is ever added - a cache, a cookie carrying more than an opaque session -
+  the middleware's `unverifiable` branch is the thing to revisit first.
+
+## The gate ran out of memory, and said so in four other suites' voices
+
+Adding this task's e2e made a fourth suite that boots a Next dev server and a Chromium beside
+it. The gate then failed like this:
+
+```
+FAIL |integration| packages/db/src/jobs.integration.test.ts
+Error: Hook timed out in 120000ms.       (beforeAll: startTestPostgres)
+FAIL |integration| packages/db/src/migrations.integration.test.ts
+Error: Hook timed out in 120000ms.
+FAIL |integration| packages/db/src/worker.integration.test.ts
+Error: Hook timed out in 120000ms.
+FAIL |unit| packages/web/src/api-boundary.test.ts
+Error: Test timed out in 180000ms.       (× refuses a direct database import ... 213333ms)
+```
+
+Four suites, none of them touched by this task, in two different packages and both projects.
+The `TypeError: Cannot read properties of undefined (reading 'stop')` that follows each hook
+timeout is just `afterAll` tidying up a container that never started.
+
+None of it is a logic failure. `node scripts/vitest.mjs run --project integration` passes all
+251 integration tests on its own, solari's twelve included. What fails is the whole run
+together, and the reason is the machine: 24 cores but 15.7 GB of memory, of which about 4 GB
+were free. Vitest's forks pool defaults to one process per core, so two dozen test files are in
+flight at once - several of them a Postgres container, several a Next dev server compiling
+routes with a browser attached. The box starts swapping, and a container that would accept
+connections in eight seconds takes more than two minutes.
+
+`--maxWorkers=8` turned the same run green: 643 passed, 0 failed, 279s against the 233s the
+failing run took to get less far. So it is now in `vitest.config.ts`:
+
+```ts
+const MAX_CONCURRENT_TEST_FILES = Math.min(8, availableParallelism());
+```
+
+Capped rather than fixed, so a four-core CI runner still gets four rather than eight fighting
+over four.
+
+**The lesson is about diagnosis, not about the number.** This is the second time this sprint
+that adding a dev-server suite has made unrelated suites fail on time, and both times the first
+reading was "those suites are flaky". They were not. An oversubscribed run does not report
+memory pressure - it reports whatever was slowest to finish while it was starving, which is
+whichever suites happened to be scheduled together, which is why the failure set looked
+arbitrary and moved between runs. Before raising a timeout in a suite you did not touch, run
+that project on its own: if it passes there and fails in the full gate, the timeout is not the
+problem and raising it just moves the failure somewhere else.
+
+The earlier entry in this file that raised `app.test.ts` and `server.test.ts` to 60-second suite
+budgets was this same effect, treated as two local problems. Those budgets are harmless and can
+stay, but with the pool capped they are no longer load-bearing.
+
+## Isolating the dev servers put a moving target inside the tree two tests walk
+
+With the pool capped the gate got further and failed somewhere new:
+
+```
+FAIL |unit| tests/solari-boundary.test.ts > the Solari vendor boundary > is one module, and it is the adapter
+Error: ENOENT: no such file or directory,
+  open 'packages/web/.next/instance-25f1b6c6-0f0b-44c8-9bac-691fc21ca213/dev/types/cache-life.d.ts'
+```
+
+Also mine, and a consequence of the dev-lock fix earlier in this sprint. `startWebDevServer`
+gives every instance its own `.next/instance-<uuid>` and `stop()` removes it. The two vendor
+boundary tests - `tests/solari-boundary.test.ts` and `tests/telegram-boundary.test.ts` - walk
+`packages`, `fixtures`, `scripts` and `tests` looking for anything that imports a vendor SDK,
+skipping `node_modules` and `dist`. Nothing skipped `.next`, so the scan walks into a directory
+a dev server is in the middle of deleting: `readdirSync` lists a name, `rm -rf` removes it, and
+`readFileSync` opens nothing.
+
+Both now skip a shared `BUILD_OUTPUT` set of `node_modules`, `dist` and `.next`. That is the
+right answer regardless of the race - `.next` holds generated `.d.ts` files, which are build
+output being scanned as if they were workspace source - but the race is why it had to be fixed
+rather than left.
+
+Worth knowing for anything else that walks the repository: **`packages/web/.next` now contains
+directories that appear and vanish while tests run.** A tree walk that does not exclude it is
+not flaky in the usual sense; it is reading a directory whose lifetime is another suite's test
+body. `eslint.config.js` and the `tsconfig` globs already exclude it, which is why lint and both
+typechecks never saw this.

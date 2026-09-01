@@ -3,10 +3,10 @@ import { describe, expect, it } from 'vitest';
 import {
   ApiError,
   ApiUnreachableError,
-  type ApiClient,
   type Observation,
   type Watch,
 } from '../api-client';
+import { stubClient } from '../testing/stub-client';
 import { loadWatchesView } from './view-model';
 
 /**
@@ -18,25 +18,6 @@ import { loadWatchesView } from './view-model';
  * These are the branches that live on the other side of that: an outage, a
  * refusal, and one watch's history failing while the rest of the page is fine.
  */
-
-const unexpected =
-  (name: string) =>
-  (): Promise<never> =>
-    Promise.reject(new Error(`${name} was not expected in this test`));
-
-function stubClient(overrides: Partial<ApiClient>): ApiClient {
-  return {
-    health: unexpected('health'),
-    session: unexpected('session'),
-    requestLink: unexpected('requestLink'),
-    listWatches: unexpected('listWatches'),
-    listObservations: unexpected('listObservations'),
-    setWatchStatus: unexpected('setWatchStatus'),
-    listCalendarItems: unexpected('listCalendarItems'),
-    listTasks: unexpected('listTasks'),
-    ...overrides,
-  };
-}
 
 function watch(overrides: Partial<Watch> & { readonly id: string }): Watch {
   return {
