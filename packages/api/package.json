@@ -19,6 +19,8 @@
   "dependencies": {
     "@chief-of-staff/core": "workspace:*",
     "@chief-of-staff/db": "workspace:*",
+    "cron-parser": "5.10.0",
+    "drizzle-orm": "0.45.2",
     "fastify": "5.12.1"
   }
 }

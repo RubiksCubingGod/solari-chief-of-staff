@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
-import { ERROR_CODES, createApp, errorEnvelope, loadConfig, violationDetails } from './index.js';
+import {
+  CALLER_HEADER,
+  ERROR_CODES,
+  HttpError,
+  createApp,
+  declaredErrorCode,
+  errorEnvelope,
+  isCronExpression,
+  loadConfig,
+  violationDetails,
+} from './index.js';
 
 describe('@chief-of-staff/api', () => {
   it('exposes the app factory, the config loader, and the error envelope', () => {
@@ -29,5 +39,22 @@ describe('@chief-of-staff/api', () => {
 
   it('keeps every error code distinct', () => {
     expect(new Set(ERROR_CODES).size).toBe(ERROR_CODES.length);
+  });
+
+  it('exposes what a client of this server has to agree with it about', () => {
+    expect(CALLER_HEADER).toBe('x-user-id');
+    expect(isCronExpression('0 * * * *')).toBe(true);
+  });
+
+  it('recognises only the codes it declares', () => {
+    expect(declaredErrorCode('not_found')).toBe('not_found');
+    expect(declaredErrorCode('FST_ERR_CTP_EMPTY_JSON_BODY')).toBeUndefined();
+    expect(declaredErrorCode(undefined)).toBeUndefined();
+    expect(new HttpError(404, 'not_found', 'gone')).toMatchObject({
+      statusCode: 404,
+      code: 'not_found',
+      message: 'gone',
+      name: 'HttpError',
+    });
   });
 });

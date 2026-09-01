@@ -46,6 +46,12 @@ importers:
       '@chief-of-staff/db':
         specifier: workspace:*
         version: link:../db
+      cron-parser:
+        specifier: 5.10.0
+        version: 5.10.0
+      drizzle-orm:
+        specifier: 0.45.2
+        version: 0.45.2(@types/pg@8.23.1)(pg@8.23.0)
       fastify:
         specifier: 5.12.1
         version: 5.12.1

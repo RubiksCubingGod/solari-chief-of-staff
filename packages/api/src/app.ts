@@ -1,11 +1,18 @@
+import { createDatabase, type Database } from '@chief-of-staff/db';
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 
 import { loadConfig, type AppConfig } from './config.js';
-import { errorEnvelope, violationDetails, type ErrorCode } from './errors.js';
+import { declaredErrorCode, errorEnvelope, violationDetails, type ErrorCode } from './errors.js';
+import { AJV_FORMATS } from './formats.js';
+import { registerRoutes } from './routes/index.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
     readonly config: AppConfig;
+    readonly db: Database['db'];
+  }
+  interface FastifyRequest {
+    userId: string;
   }
 }
 
@@ -23,16 +30,33 @@ const CODE_BY_STATUS: Readonly<Record<number, ErrorCode>> = {
 
 export function createApp(environment: NodeJS.ProcessEnv = process.env): FastifyInstance {
   const config = loadConfig(environment);
+  const database = createDatabase(config.databaseUrl);
   const app = Fastify({
     logger: { level: config.logLevel },
     // Report every schema violation in one response; a client fixing a form
     // should not have to submit it once per bad field.
-    ajv: { customOptions: { allErrors: true, coerceTypes: false, removeAdditional: false } },
+    ajv: {
+      customOptions: {
+        allErrors: true,
+        coerceTypes: false,
+        removeAdditional: false,
+        formats: AJV_FORMATS,
+      },
+    },
   });
 
   app.decorate('config', config);
+  app.decorate('db', database.db);
+  // The identity a route works on behalf of, filled in per request by
+  // `resolveCaller`. Declared here because Fastify 5 will not accept a property
+  // that was not declared on the request prototype.
+  app.decorateRequest('userId', '');
+  // The pool outlives every request but not the server, so closing the app
+  // releases the connections rather than leaving a test process hanging.
+  app.addHook('onClose', () => database.close());
 
   app.get('/health', () => ({ status: 'ok' }));
+  registerRoutes(app);
 
   app.setNotFoundHandler((request, reply) => {
     void reply
@@ -65,7 +89,10 @@ export function createApp(environment: NodeJS.ProcessEnv = process.env): Fastify
         .send(errorEnvelope('internal_error', 'The server failed to handle the request.'));
       return;
     }
-    void reply.status(status).send(errorEnvelope(CODE_BY_STATUS[status] ?? 'bad_request', error.message));
+    // A refusal a handler raised names its own code; anything Fastify raised is
+    // identified by the status it chose.
+    const code = declaredErrorCode(error.code) ?? CODE_BY_STATUS[status] ?? 'bad_request';
+    void reply.status(status).send(errorEnvelope(code, error.message));
   });
 
   return app;

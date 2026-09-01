@@ -18,12 +18,23 @@ const WORKSPACE_PACKAGES = [
  * source, so a test run never depends on a prior build and coverage is
  * attributed to source lines rather than emitted output.
  */
-const sourceAliases = Object.fromEntries(
-  WORKSPACE_PACKAGES.map((name) => [
-    `@chief-of-staff/${name}`,
-    fileURLToPath(new URL(`./packages/${name}/src/index.ts`, import.meta.url)),
-  ]),
-);
+const sourceAliases = {
+  /**
+   * Every package's integration tests start Postgres through the db package's
+   * helper. It is source-only - excluded from that package's build and from its
+   * published exports - so it is aliased explicitly, and listed first because
+   * the bare `@chief-of-staff/db` alias would otherwise swallow the subpath.
+   */
+  '@chief-of-staff/db/testing': fileURLToPath(
+    new URL('./packages/db/src/testing/postgres.ts', import.meta.url),
+  ),
+  ...Object.fromEntries(
+    WORKSPACE_PACKAGES.map((name) => [
+      `@chief-of-staff/${name}`,
+      fileURLToPath(new URL(`./packages/${name}/src/index.ts`, import.meta.url)),
+    ]),
+  ),
+};
 
 /**
  * The coverage gate from ARCHITECTURE §9.3. Exported so the gate itself is

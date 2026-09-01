@@ -53,3 +53,25 @@ export function violationDetails(violations: readonly SchemaViolation[]): ErrorD
     message: violation.message ?? 'is invalid',
   }));
 }
+
+/**
+ * A refusal a handler raises itself, for the cases JSON Schema cannot see: a
+ * row that does not exist, or one that belongs to somebody else. It carries the
+ * envelope code so the error handler does not have to guess one from the status.
+ */
+export class HttpError extends Error {
+  readonly statusCode: number;
+  readonly code: ErrorCode;
+
+  constructor(statusCode: number, code: ErrorCode, message: string) {
+    super(message);
+    this.name = 'HttpError';
+    this.statusCode = statusCode;
+    this.code = code;
+  }
+}
+
+/** Narrows an arbitrary error `code` to one this server declares. */
+export function declaredErrorCode(code: unknown): ErrorCode | undefined {
+  return ERROR_CODES.find((declared) => declared === code);
+}

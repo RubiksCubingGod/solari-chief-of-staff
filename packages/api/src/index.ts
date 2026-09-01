@@ -1,4 +1,5 @@
 export { createApp } from './app.js';
+export { CALLER_HEADER } from './caller.js';
 export {
   ConfigError,
   LOG_LEVELS,
@@ -10,6 +11,8 @@ export {
 } from './config.js';
 export {
   ERROR_CODES,
+  HttpError,
+  declaredErrorCode,
   errorEnvelope,
   violationDetails,
   type ErrorCode,
@@ -17,3 +20,4 @@ export {
   type ErrorEnvelope,
   type SchemaViolation,
 } from './errors.js';
+export { isCronExpression, isHttpUrl, isIsoDate, isUuid } from './formats.js';
