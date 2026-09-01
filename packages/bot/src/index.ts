@@ -53,6 +53,7 @@ export {
 export {
   createBotRuntime,
   logPollingFailure,
+  logUpdateFailure,
   type BotRuntime,
   type BotRuntimeOptions,
 } from './runtime.js';

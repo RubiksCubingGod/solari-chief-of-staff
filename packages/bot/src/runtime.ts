@@ -96,6 +96,13 @@ export interface BotRuntimeOptions {
    * a process that has somewhere better to send an outage passes that instead.
    */
   readonly onPollingFailure?: (error: unknown) => void;
+  /**
+   * Where one update that failed gets reported. Defaults to
+   * `logUpdateFailure`. Separate from `onPollingFailure` because the two ask
+   * different things of whoever reads them: one update failing is a chat to
+   * look into, the poll dying is a bot to restart.
+   */
+  readonly onUpdateFailure?: (error: unknown) => void;
 }
 
 /**
@@ -109,6 +116,26 @@ export interface BotRuntimeOptions {
  * stops hearing anyone. Shaped like `logPoolError` in `@chief-of-staff/db`,
  * which exists for exactly the same reason on the other side of the system.
  */
+/**
+ * The default report for one update that failed partway through.
+ *
+ * Installing any handler at all is what keeps the bot alive: grammY rethrows
+ * an unhandled middleware error, and out of the polling loop that rejection
+ * ends the loop — so a single chat the bot cannot reply to, a user who blocked
+ * it or a chat that was deleted, would stop every other chat being heard. The
+ * error is reported rather than swallowed for the obvious reason, and only its
+ * message is written: a grammY error carries the request that produced it, and
+ * that request is authenticated with the bot token.
+ */
+export function logUpdateFailure(
+  error: unknown,
+  write: (line: string) => void = (line) => {
+    console.error(line);
+  },
+): void {
+  write(`[bot] update failed: ${error instanceof Error ? error.message : String(error)}`);
+}
+
 export function logPollingFailure(
   error: unknown,
   write: (line: string) => void = (line) => {
@@ -135,6 +162,7 @@ export function createBotRuntime(options: BotRuntimeOptions): BotRuntime {
       : new Bot(config.token, { botInfo: options.botInfo });
   const now = options.now ?? Date.now;
   const reportPollingFailure = options.onPollingFailure ?? logPollingFailure;
+  const reportUpdateFailure = options.onUpdateFailure ?? logUpdateFailure;
   const limiter = createRateLimiter(config.rateLimit, now);
 
   // Order matters twice over, in opposite directions, because grammY composes
@@ -164,6 +192,14 @@ export function createBotRuntime(options: BotRuntimeOptions): BotRuntime {
       answerSink: options.answerSink ?? createTaskEventAnswerSink(db),
     }),
   );
+
+  // Installed last, over a finished chain: from here an update that throws is
+  // reported and the bot carries on, rather than taking the polling loop down
+  // with it. Nothing about the failing update is recovered — the reply that
+  // could not be sent stays unsent — because there is nowhere left to send it.
+  bot.catch((error) => {
+    reportUpdateFailure(error);
+  });
 
   return {
     transport: config.transport,

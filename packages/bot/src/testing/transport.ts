@@ -84,6 +84,16 @@ export interface TestTransport {
    * after `start()` has returned.
    */
   failPolling(errorCode: number, description: string): void;
+  /**
+   * Queues updates for the next long poll to hand back.
+   *
+   * The alternative — calling `bot.handleUpdate` — is a different path, and
+   * for anything about failure it is the wrong one: `handleUpdate` throws by
+   * design, and grammY's own polling loop is what decides whether that ends
+   * the bot or is reported and stepped over. Only a proof that goes through
+   * the poll can tell those two apart.
+   */
+  deliver(...updates: readonly Update[]): void;
   clear(): void;
 }
 
@@ -118,6 +128,7 @@ export function createTestTransport(options: TestTransportOptions = {}): TestTra
   const delivered: SentMessage[] = [];
   const script: SendOutcome[] = [];
   let pollingFailure: { errorCode: number; description: string } | undefined;
+  const queued: Update[] = [];
 
   const stub: StubTransformer = async (_prev, method, payload, signal) => {
     calls.push({ method, payload: { ...payload } });
@@ -129,12 +140,17 @@ export function createTestTransport(options: TestTransportOptions = {}): TestTra
       }
       delivered.push({ chatId: String(payload['chat_id']), text: String(payload['text']) });
     }
-    if (method === 'getUpdates' && pollingFailure !== undefined) {
-      return {
-        ok: false,
-        error_code: pollingFailure.errorCode,
-        description: pollingFailure.description,
-      };
+    if (method === 'getUpdates') {
+      if (pollingFailure !== undefined) {
+        return {
+          ok: false,
+          error_code: pollingFailure.errorCode,
+          description: pollingFailure.description,
+        };
+      }
+      // Anything queued goes out at once; an empty poll waits, as a real one
+      // does, so a test that only wants the loop running does not spin it hot.
+      if (queued.length > 0) return { ok: true, result: queued.splice(0) };
     }
     return { ok: true, result: await resultFor(method, longPollMs, signal) };
   };
@@ -155,10 +171,14 @@ export function createTestTransport(options: TestTransportOptions = {}): TestTra
     failPolling: (errorCode: number, description: string) => {
       pollingFailure = { errorCode, description };
     },
+    deliver: (...updates: readonly Update[]) => {
+      queued.push(...updates);
+    },
     clear: () => {
       calls.length = 0;
       delivered.length = 0;
       script.length = 0;
+      queued.length = 0;
       pollingFailure = undefined;
     },
   };

@@ -243,6 +243,65 @@ describe('transcript persistence', () => {
   });
 });
 
+describe('a failure partway through an update', () => {
+  it('survives a reply Telegram refuses, and reports it, rather than stopping', async () => {
+    const failures: unknown[] = [];
+    const transport = createTestTransport();
+    transport.scriptSends({
+      kind: 'refused',
+      errorCode: 403,
+      description: 'Forbidden: bot was blocked by the user',
+    });
+    const runtime = createBotRuntime({
+      config: configFor(),
+      db: database.db,
+      transformer: transport.transformer,
+      botInfo: TEST_BOT_INFO,
+      chatLoop,
+      onUpdateFailure: (error) => failures.push(error),
+    });
+    started.push(runtime);
+    await runtime.start();
+
+    // A blocked bot is the ordinary version of this: somebody blocks the chat,
+    // the next reply is refused, and grammY rethrows that out of the polling
+    // loop. Unhandled it ends the loop, so one person leaving takes every
+    // other chat down with them — a far larger outage than the one that
+    // caused it, and one nobody would think to look for.
+    transport.deliver(textUpdate(BOUND_CHAT, 'hello'));
+    await vi.waitFor(() => {
+      expect(failures).toHaveLength(1);
+    });
+    expect(String(failures[0])).toContain('Forbidden');
+    expect(runtime.bot.isRunning()).toBe(true);
+
+    // Still serving, and the proof of it is another chat being answered after
+    // the failure rather than the bot merely claiming to be up.
+    transport.deliver(textUpdate(SECOND_BOUND_CHAT, 'are you still there'));
+    await vi.waitFor(() => {
+      expect(transport.sent()).toEqual([{ chatId: SECOND_BOUND_CHAT, text: LOOP_REPLY }]);
+    });
+
+    // The message that arrived is on the record; the reply that never landed
+    // is not, which is the difference somebody reading this back needs to see.
+    expect(await transcript()).toEqual([
+      { direction: 'inbound', chatId: BOUND_CHAT, text: 'hello', userId: boundUserId },
+      {
+        direction: 'inbound',
+        chatId: SECOND_BOUND_CHAT,
+        text: 'are you still there',
+        userId: secondUserId,
+      },
+      {
+        direction: 'outbound',
+        chatId: SECOND_BOUND_CHAT,
+        text: LOOP_REPLY,
+        userId: secondUserId,
+      },
+    ]);
+  });
+});
+
 describe('rate limiting', () => {
   it('refuses a flood with one notice per window and transcribes all of it', async () => {
     const transport = createTestTransport();
