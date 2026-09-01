@@ -3,17 +3,22 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Bot, webhookCallback, type Context, type MiddlewareFn, type Transformer } from 'grammy';
 import type { UserFromGetMe } from 'grammy/types';
 
+import { bindChat, type BindingOutcome } from './binding.js';
 import type { BotConfig, BotTransport } from './config.js';
+import { createNoticeGate, type NoticeGate } from './notice-gate.js';
 import { createRateLimiter, type RateLimiter } from './rate-limit.js';
-import { recordMessage, type BotDatabase } from './transcript.js';
-
-/**
- * What a chat that has run out of tokens is told, once per notice window. It
- * names the limit rather than blaming the sender: the usual cause is a retry
- * loop somewhere, not a person typing quickly.
- */
-export const RATE_LIMIT_NOTICE =
-  'You are sending messages faster than I can handle them. I have paused this chat for a moment — everything you send meanwhile is ignored, so please resend anything that mattered.';
+import {
+  BINDING_ALREADY_DONE,
+  BINDING_CHAT_TAKEN,
+  BINDING_CODE_CONSUMED,
+  BINDING_CODE_EXPIRED,
+  BINDING_CODE_UNKNOWN,
+  BINDING_CONFIRMED,
+  BINDING_USER_TAKEN,
+  HOW_TO_BIND,
+  RATE_LIMIT_NOTICE,
+} from './replies.js';
+import { recordMessage, resolveUserId, type BotDatabase } from './transcript.js';
 
 export interface BotRuntime {
   /** The transport the configuration selected, before anything starts. */
@@ -59,7 +64,8 @@ export function createBotRuntime(options: BotRuntimeOptions): BotRuntime {
     options.botInfo === undefined
       ? new Bot(config.token)
       : new Bot(config.token, { botInfo: options.botInfo });
-  const limiter = createRateLimiter(config.rateLimit, options.now ?? Date.now);
+  const now = options.now ?? Date.now;
+  const limiter = createRateLimiter(config.rateLimit, now);
 
   // Order matters twice over, in opposite directions, because grammY composes
   // its two pipelines the opposite way round.
@@ -78,6 +84,8 @@ export function createBotRuntime(options: BotRuntimeOptions): BotRuntime {
   // arrived.
   bot.use(transcribeInbound(db));
   bot.use(refuseFloods(limiter));
+  bot.use(redeemStart(db));
+  bot.use(requireBinding(db, createNoticeGate(config.rateLimit.noticeWindowMs, now)));
 
   return {
     transport: config.transport,
@@ -118,6 +126,62 @@ export function createBotRuntime(options: BotRuntimeOptions): BotRuntime {
       if (config.transport === 'webhook') return;
       await bot.stop();
     },
+  };
+}
+
+/** What each binding outcome is answered with. */
+const BINDING_REPLIES: Readonly<Record<BindingOutcome, string>> = {
+  bound: BINDING_CONFIRMED,
+  'already-bound': BINDING_ALREADY_DONE,
+  'unknown-code': BINDING_CODE_UNKNOWN,
+  expired: BINDING_CODE_EXPIRED,
+  consumed: BINDING_CODE_CONSUMED,
+  'chat-bound-elsewhere': BINDING_CHAT_TAKEN,
+  'user-bound-elsewhere': BINDING_USER_TAKEN,
+};
+
+/**
+ * Handles `/start`, the one thing an unbound chat is allowed to do. A bare
+ * `/start` is not a failed redemption but somebody who has just opened the
+ * chat, so it gets the instructions rather than a refusal.
+ */
+function redeemStart(db: BotDatabase): MiddlewareFn<Context> {
+  return async (ctx, next) => {
+    const text = ctx.message?.text;
+    const chatId = ctx.chat?.id;
+    if (text === undefined || chatId === undefined || !/^\/start(@\S+)?(\s|$)/u.test(text)) {
+      await next();
+      return;
+    }
+    const code = text.replace(/^\/start(@\S+)?/u, '').trim();
+    if (code === '') {
+      await ctx.reply(HOW_TO_BIND);
+      return;
+    }
+    const result = await bindChat(db, { chatId: String(chatId), code });
+    await ctx.reply(BINDING_REPLIES[result.outcome]);
+    // Redemption is the whole of this message either way. Passing an accepted
+    // `/start` on would hand the tool loop the code as if it were a request.
+  };
+}
+
+/**
+ * The authorization boundary. Nothing downstream runs for a chat that is bound
+ * to nobody, so no later handler has to remember to check — a chat that reaches
+ * past here has a user.
+ */
+function requireBinding(db: BotDatabase, gate: NoticeGate): MiddlewareFn<Context> {
+  return async (ctx, next) => {
+    const chatId = ctx.chat?.id;
+    if (chatId === undefined) return;
+    if ((await resolveUserId(db, String(chatId))) !== null) {
+      await next();
+      return;
+    }
+    // Told how to bind at most once per window. Refusing is unconditional;
+    // only the explanation is rationed, or a script talking to an unbound chat
+    // would get one reply per message forever.
+    if (gate.due(String(chatId))) await ctx.reply(HOW_TO_BIND);
   };
 }
 

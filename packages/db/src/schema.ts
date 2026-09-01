@@ -52,7 +52,12 @@ const timestampColumn = (name: string) => timestamp(name, { withTimezone: true }
 
 export const users = pgTable('users', {
   id: primaryKeyColumn(),
-  telegramChatId: text('telegram_chat_id').notNull().unique(),
+  // Null until a chat binds to this user. A user is issued a binding code
+  // before any chat has sent `/start`, so requiring the address here would mean
+  // no user could ever be created to issue a code for. Still unique: Postgres
+  // permits many nulls in a unique index but only one of any given chat id,
+  // which is what makes one chat bind to at most one user.
+  telegramChatId: text('telegram_chat_id').unique(),
   email: text('email'),
   tz: text('tz').notNull().default('UTC'),
   createdAt: timestampColumn('created_at').notNull().defaultNow(),
@@ -199,6 +204,32 @@ export const messages = pgTable(
 );
 
 /** Every table in the section 5 model, in dependency order. */
+/**
+ * One-time codes that bind a chat to a user (ARCHITECTURE §10). Not in the §5
+ * sketch, which names the tables the product reads; this one is the mechanism
+ * behind a line in §10, and it is a table rather than a signed token because
+ * single use has to survive a restart and be revocable by deleting a row.
+ */
+export const bindingCodes = pgTable(
+  'binding_codes',
+  {
+    id: primaryKeyColumn(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    // Unique so two users can never hold the same code, which would make
+    // redemption ambiguous at exactly the moment it must not be.
+    code: text('code').notNull().unique(),
+    expiresAt: timestampColumn('expires_at').notNull(),
+    // Set when redeemed, and the whole of single-use: a code is spent, not
+    // deleted, so a second attempt can be told apart from a code that never
+    // existed and answered differently.
+    consumedAt: timestampColumn('consumed_at'),
+    createdAt: timestampColumn('created_at').notNull().defaultNow(),
+  },
+  (table) => [index('binding_codes_user_id_idx').on(table.userId)],
+);
+
 export const SCHEMA_TABLE_NAMES = [
   'users',
   'site_connections',
@@ -208,6 +239,7 @@ export const SCHEMA_TABLE_NAMES = [
   'task_events',
   'calendar_items',
   'messages',
+  'binding_codes',
 ] as const;
 
 export type User = typeof users.$inferSelect;
@@ -226,3 +258,5 @@ export type CalendarItem = typeof calendarItems.$inferSelect;
 export type NewCalendarItem = typeof calendarItems.$inferInsert;
 export type Message = typeof messages.$inferSelect;
 export type NewMessage = typeof messages.$inferInsert;
+export type BindingCode = typeof bindingCodes.$inferSelect;
+export type NewBindingCode = typeof bindingCodes.$inferInsert;

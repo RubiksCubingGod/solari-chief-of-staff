@@ -81,3 +81,10 @@ export const isSiteConnectionStatus = memberGuard(SITE_CONNECTION_STATUSES);
 export const isCalendarItemStatus = memberGuard(CALENDAR_ITEM_STATUSES);
 export const isMessageDirection = memberGuard(MESSAGE_DIRECTIONS);
 export const isMessageChannel = memberGuard(MESSAGE_CHANNELS);
+
+export {
+  BINDING_CODE_ALPHABET,
+  BINDING_CODE_LENGTH,
+  isBindingCode,
+  normalizeBindingCode,
+} from './binding-code.js';

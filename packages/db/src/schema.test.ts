@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   SCHEMA_TABLE_NAMES,
+  bindingCodes,
   calendarItems,
   messages,
   observations,
@@ -23,6 +24,7 @@ const TABLES: PgTable[] = [
   taskEvents,
   calendarItems,
   messages,
+  bindingCodes,
 ];
 
 interface ForeignKeyShape {
@@ -118,6 +120,9 @@ describe('the section 5 schema', () => {
     expect(indexedColumns(calendarItems)).toEqual({
       calendar_items_user_id_idx: ['user_id'],
     });
+    expect(indexedColumns(bindingCodes)).toEqual({
+      binding_codes_user_id_idx: ['user_id'],
+    });
   });
 
   it('transcribes a chat that belongs to nobody yet', () => {
@@ -134,6 +139,34 @@ describe('the section 5 schema', () => {
     // The text itself stays required: a transcript row that records nothing is
     // worse than no row, because it looks like evidence.
     expect(columns['text']?.notNull).toBe(true);
+  });
+
+  it('lets a user exist before any chat is bound to them', () => {
+    const columns = Object.fromEntries(
+      getTableConfig(users).columns.map((column) => [column.name, column]),
+    );
+
+    // A binding code is issued for a user who has not sent `/start` yet, so a
+    // required chat id would mean no user could be created to issue one for.
+    expect(columns['telegram_chat_id']?.notNull).toBe(false);
+    // Still at most one user per chat, which is what makes "who is this chat"
+    // a question with one answer. Postgres permits many nulls in a unique
+    // index, so the two properties do not conflict.
+    expect(columns['telegram_chat_id']?.isUnique).toBe(true);
+  });
+
+  it('spends a binding code rather than deleting it', () => {
+    const columns = Object.fromEntries(
+      getTableConfig(bindingCodes).columns.map((column) => [column.name, column]),
+    );
+
+    // Nullable, and the whole of single use: a spent code is still there to be
+    // found, so a second attempt is answered differently from a code that never
+    // existed - which is what a person who sent theirs twice needs to hear.
+    expect(columns['consumed_at']?.notNull).toBe(false);
+    expect(columns['expires_at']?.notNull).toBe(true);
+    // Unique, or redemption would be ambiguous at the moment it must not be.
+    expect(columns['code']?.isUnique).toBe(true);
   });
 
   it('allows one stored login per site per user', () => {

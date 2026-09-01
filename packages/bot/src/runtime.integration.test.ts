@@ -4,7 +4,8 @@ import { asc } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { loadBotConfig, type BotConfig } from './config.js';
-import { RATE_LIMIT_NOTICE, createBotRuntime, type BotRuntime } from './runtime.js';
+import { HOW_TO_BIND, RATE_LIMIT_NOTICE } from './replies.js';
+import { createBotRuntime, type BotRuntime } from './runtime.js';
 import { TEST_BOT_INFO, createTestTransport, textUpdate, type TestTransport } from './testing/transport.js';
 
 /**
@@ -17,10 +18,12 @@ import { TEST_BOT_INFO, createTestTransport, textUpdate, type TestTransport } fr
 
 const BOUND_CHAT = '90001';
 const UNBOUND_CHAT = '90002';
+const SECOND_BOUND_CHAT = '90003';
 
 let postgres: TestPostgres;
 let database: Database;
 let boundUserId: string;
+let secondUserId: string;
 const started: BotRuntime[] = [];
 
 const BASE_ENVIRONMENT = {
@@ -66,16 +69,18 @@ async function transcript(): Promise<{ direction: string; chatId: string | null;
   }));
 }
 
+async function createUser(telegramChatId: string): Promise<string> {
+  const [created] = await database.db.insert(users).values({ telegramChatId }).returning();
+  if (created === undefined) throw new Error('the fixture user was not created');
+  return created.id;
+}
+
 beforeAll(async () => {
   postgres = await startTestPostgres();
   await runMigrations(postgres.connectionString);
   database = createDatabase(postgres.connectionString);
-  const [created] = await database.db
-    .insert(users)
-    .values({ telegramChatId: BOUND_CHAT })
-    .returning();
-  if (created === undefined) throw new Error('the fixture user was not created');
-  boundUserId = created.id;
+  boundUserId = await createUser(BOUND_CHAT);
+  secondUserId = await createUser(SECOND_BOUND_CHAT);
 });
 
 afterAll(async () => {
@@ -153,10 +158,11 @@ describe('transcript persistence', () => {
 
     await runtime.bot.handleUpdate(textUpdate(UNBOUND_CHAT, 'hello?'));
 
-    // No user to attribute it to, and still in the transcript: how somebody
+    // Nobody to attribute either row to, and both rows kept: how somebody
     // failed to bind is exactly the exchange worth being able to read back.
     expect(await transcript()).toEqual([
       { direction: 'inbound', chatId: UNBOUND_CHAT, text: 'hello?', userId: null },
+      { direction: 'outbound', chatId: UNBOUND_CHAT, text: HOW_TO_BIND, userId: null },
     ]);
   });
 
@@ -204,9 +210,17 @@ describe('rate limiting', () => {
       await runtime.bot.handleUpdate(textUpdate(BOUND_CHAT, text));
     }
     transport.clear();
-    await runtime.bot.handleUpdate(textUpdate(UNBOUND_CHAT, 'am I still allowed?'));
+    await runtime.bot.handleUpdate(textUpdate(SECOND_BOUND_CHAT, 'am I still allowed?'));
 
+    // Not refused, and not answered either: a bound chat with tokens left falls
+    // through to whatever handles it, which in this sprint is nothing yet.
     expect(transport.sent()).toEqual([]);
+    expect(await transcript()).toContainEqual({
+      direction: 'inbound',
+      chatId: SECOND_BOUND_CHAT,
+      text: 'am I still allowed?',
+      userId: secondUserId,
+    });
   });
 });
 

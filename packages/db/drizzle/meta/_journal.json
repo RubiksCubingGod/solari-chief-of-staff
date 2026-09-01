@@ -15,6 +15,13 @@
       "when": 1788281198897,
       "tag": "0001_unattributed_transcript_rows",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788282587935,
+      "tag": "0002_binding_codes",
+      "breakpoints": true
     }
   ]
 }
