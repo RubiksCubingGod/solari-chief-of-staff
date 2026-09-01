@@ -37,7 +37,7 @@ unknown mode is refused with a 400 and the instance keeps the mode it had.
 | Mode | Fetch surface | Selector surface |
 | --- | --- | --- |
 | `normal` | the page as specified | the normal layout |
-| `blocked` | captcha shell to a plain fetch; the body travels base64-encoded in a script, so only a client that executes JavaScript materializes it | normal |
+| `blocked` | captcha shell to a plain fetch; the body travels base64-encoded in a script, so only a client that executes JavaScript materializes it — and that script flips `fixture-state` to normal with the body, so a client never holds normal content still labelled blocked | normal |
 | `hard-blocked` | captcha shell with no recoverable body; the real content is served only to a request carrying the escalation header | normal |
 | `redesign` | normal | class names, ids, and nesting rotate to a deterministic second layout |
 
