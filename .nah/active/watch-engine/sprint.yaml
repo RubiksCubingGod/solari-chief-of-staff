@@ -1,0 +1,30 @@
+schema_version: 1
+id: watch-engine
+alias: s2
+wall_hours_estimate: 21
+estimated_task_count: 8
+average_task_agent_hours: 2
+created_at: 2026-09-01
+created_by: RubiksCubingGod
+owner: RubiksCubingGod
+repositories:
+  - id: chief-of-staff
+    remote: RubiksCubingGod/chief-of-staff
+release:
+  outcome: Price and change watches run on schedule against fixtures with tiered
+    fetching (HTTP, browser, stealth), deterministic extractors created once by
+    LLM, self-healing on selector breakage, observation history, and
+    trigger-to-notifier events.
+  kind: feature
+  change_sets:
+    - repository: chief-of-staff
+      depends_on: []
+project_management:
+  links: []
+origin:
+  summary: Price and change watches run on schedule against fixtures with tiered
+    fetching (HTTP, browser, stealth), deterministic extractors created once by
+    LLM, self-healing on selector breakage, observation history, and
+    trigger-to-notifier events.
+  refs:
+    - .nah/projects/chief-of-staff/project.yaml

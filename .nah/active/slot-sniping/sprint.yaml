@@ -1,0 +1,28 @@
+schema_version: 1
+id: slot-sniping
+alias: s8
+wall_hours_estimate: 8
+estimated_task_count: 3
+average_task_agent_hours: 2
+created_at: 2026-09-01
+created_by: RubiksCubingGod
+owner: RubiksCubingGod
+repositories:
+  - id: chief-of-staff
+    remote: RubiksCubingGod/chief-of-staff
+release:
+  outcome: Slot watches that on trigger immediately enqueue and run a
+    book-this-slot task against fakedmv, with race-safe re-arm when the slot is
+    gone by booking time.
+  kind: feature
+  change_sets:
+    - repository: chief-of-staff
+      depends_on: []
+project_management:
+  links: []
+origin:
+  summary: Slot watches that on trigger immediately enqueue and run a
+    book-this-slot task against fakedmv, with race-safe re-arm when the slot is
+    gone by booking time.
+  refs:
+    - .nah/projects/chief-of-staff/project.yaml

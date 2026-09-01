@@ -60,12 +60,15 @@ sprints:
     alias: s1b
     owner: RubiksCubingGod
     wall_hours_estimate: 13
-    estimated_task_count: 5
+    estimated_task_count: 6
     average_task_agent_hours: 2
     release:
-      outcome: Controllable fixture sites (fakestore, fakegym, fakedmv, fakenews) with hostile
-        modes (blocked captcha shell, redesign) and queryable test endpoints, bootable by the
-        integration harness, so every later release proves behavior against exact fixture state.
+      outcome: Controllable fixture sites (fakestore, fakegym, fakedmv, fakenews) booted per
+        test file as private in-process instances on ephemeral ports, with a control plane that
+        seeds and reads exact state, transaction flows that refuse skipped steps and award a
+        contested slot exactly once, and hostile modes (blocked, hard-blocked, redesign) toggled
+        on a live instance without changing its URL - so every later release proves behavior
+        against exact fixture state instead of against a screenshot.
       kind: tooling
       change_sets:
         - repository: chief-of-staff
@@ -90,7 +93,7 @@ sprints:
     alias: s2
     owner: RubiksCubingGod
     wall_hours_estimate: 21
-    estimated_task_count: 9
+    estimated_task_count: 8
     average_task_agent_hours: 2
     release:
       outcome: Price and change watches run on schedule against fixtures with tiered fetching
@@ -104,7 +107,7 @@ sprints:
     alias: s3
     owner: RubiksCubingGod
     wall_hours_estimate: 13
-    estimated_task_count: 7
+    estimated_task_count: 6
     average_task_agent_hours: 2
     release:
       outcome: A bound Telegram bot where natural language becomes structured CRUD API calls
@@ -118,7 +121,7 @@ sprints:
     alias: s4
     owner: RubiksCubingGod
     wall_hours_estimate: 13
-    estimated_task_count: 6
+    estimated_task_count: 5
     average_task_agent_hours: 2
     release:
       outcome: An authenticated magic-link Next.js dashboard rendering watches with observation
@@ -132,7 +135,7 @@ sprints:
     alias: s5
     owner: RubiksCubingGod
     wall_hours_estimate: 21
-    estimated_task_count: 8
+    estimated_task_count: 6
     average_task_agent_hours: 3
     release:
       outcome: The action engine in playbook mode - persisted task state machine with a
@@ -147,7 +150,7 @@ sprints:
     alias: s6
     owner: RubiksCubingGod
     wall_hours_estimate: 21
-    estimated_task_count: 7
+    estimated_task_count: 5
     average_task_agent_hours: 3
     release:
       outcome: LLM-driven browser missions for sites without a playbook - tool loop with budgets,
@@ -161,7 +164,7 @@ sprints:
     alias: s7
     owner: RubiksCubingGod
     wall_hours_estimate: 8
-    estimated_task_count: 5
+    estimated_task_count: 4
     average_task_agent_hours: 2
     release:
       outcome: Calendar subscriptions and deadlines created via chat or dashboard, daily cron
@@ -175,7 +178,7 @@ sprints:
     alias: s8
     owner: RubiksCubingGod
     wall_hours_estimate: 8
-    estimated_task_count: 4
+    estimated_task_count: 3
     average_task_agent_hours: 2
     release:
       outcome: Slot watches that on trigger immediately enqueue and run a book-this-slot task
@@ -188,7 +191,7 @@ sprints:
     alias: s9
     owner: RubiksCubingGod
     wall_hours_estimate: 21
-    estimated_task_count: 6
+    estimated_task_count: 5
     average_task_agent_hours: 3
     release:
       outcome: The system proven against 2-3 chosen real sites with real watches and playbooks,
@@ -202,7 +205,7 @@ sprints:
     alias: s10
     owner: RubiksCubingGod
     wall_hours_estimate: 13
-    estimated_task_count: 6
+    estimated_task_count: 4
     average_task_agent_hours: 2
     release:
       outcome: Deployed to production with a public repo, verified fresh-clone setup, README and
