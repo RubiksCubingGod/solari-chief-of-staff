@@ -5,7 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createChatAgent, type ChatAgent } from './chat-agent.js';
 import { createHttpCrudClient, type CrudClient } from './crud.js';
-import { LLM_UNAVAILABLE, TOOL_BUDGET_SPENT } from './replies.js';
+import { LLM_UNAVAILABLE, LLM_UNAVAILABLE_MIDWAY, TOOL_BUDGET_SPENT } from './replies.js';
 import { CHAT_TOOL_NAMES } from './tools.js';
 import {
   createScriptedLlm,
@@ -319,10 +319,12 @@ describe('a refusal that came from somewhere else', () => {
     const turn = await agent.respond({ userId: ownerId, text: 'watch this for me' });
 
     expect(turn.outcome).toBe('unavailable');
-    expect(turn.reply).toBe(LLM_UNAVAILABLE);
-    // The watch was created before the outage, and it stays created: the reply
-    // is an apology for the missing confirmation, not a claim that nothing
-    // happened. The tool calls carry what did.
+    // The watch was created before the outage and it stays created, so this is
+    // not the apology an outage that did nothing gets. Telling this user
+    // nothing happened would send them back to ask again, and the second ask
+    // would work: one message, two watches, two sets of alerts forever.
+    expect(turn.reply).toBe(LLM_UNAVAILABLE_MIDWAY);
+    expect(turn.reply).not.toBe(LLM_UNAVAILABLE);
     expect(turn.toolCalls.map((call) => call.name)).toEqual(['create_watch']);
     expect(await listAs(ownerId, '/watches')).toHaveLength(1);
   });

@@ -1,7 +1,12 @@
 import type Anthropic from '@anthropic-ai/sdk';
 
 import type { CrudClient } from './crud.js';
-import { LLM_UNAVAILABLE, NO_REPLY_PRODUCED, TOOL_BUDGET_SPENT } from './replies.js';
+import {
+  LLM_UNAVAILABLE,
+  LLM_UNAVAILABLE_MIDWAY,
+  NO_REPLY_PRODUCED,
+  TOOL_BUDGET_SPENT,
+} from './replies.js';
 import { createChatToolkit, type ToolCallRecord } from './tools.js';
 
 /**
@@ -128,7 +133,15 @@ export function createChatAgent(options: ChatAgentOptions): ChatAgent {
         // handler with a person waiting on it; what it needs is something to
         // send and an honest record of what already happened, which is exactly
         // what the toolkit still holds.
-        return { reply: LLM_UNAVAILABLE, outcome: 'unavailable', toolCalls: toolkit.calls };
+        //
+        // Which apology depends on that record. An outage before anything ran
+        // changed nothing; an outage after a tool call left the change in
+        // place, and the two cannot honestly be told the same thing.
+        return {
+          reply: toolkit.calls.length === 0 ? LLM_UNAVAILABLE : LLM_UNAVAILABLE_MIDWAY,
+          outcome: 'unavailable',
+          toolCalls: toolkit.calls,
+        };
       }
 
       // Checked before the model's own words, because a turn cut off at the

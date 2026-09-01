@@ -33,7 +33,12 @@ export {
   LIVE_LLM_FLAG,
   liveLlmSkipReason,
 } from './live-llm.js';
-export { LLM_UNAVAILABLE, NO_REPLY_PRODUCED, TOOL_BUDGET_SPENT } from './replies.js';
+export {
+  LLM_UNAVAILABLE,
+  LLM_UNAVAILABLE_MIDWAY,
+  NO_REPLY_PRODUCED,
+  TOOL_BUDGET_SPENT,
+} from './replies.js';
 export {
   CHAT_TOOL_NAMES,
   createChatToolkit,
