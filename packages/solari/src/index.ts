@@ -31,3 +31,13 @@ export {
   createLocalProvider,
   type LocalProviderOptions,
 } from './local.js';
+
+export {
+  createSolariProvider,
+  PROXY_COUNTRIES,
+  type SolariClient,
+  type SolariClientOptions,
+  type SolariProviderOptions,
+  type SolariSessionHandle,
+  STICKY_DURATION_MINUTES,
+} from './solari.js';
