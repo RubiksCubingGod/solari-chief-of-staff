@@ -1,9 +1,5 @@
 packages:
   - packages/*
-allowBuilds:
-  cpu-features: set this to true or false
-  protobufjs: set this to true or false
-  ssh2: set this to true or false
 minimumReleaseAgeExclude:
   - '@typescript-eslint/eslint-plugin@8.69.0'
   - '@typescript-eslint/parser@8.69.0'
@@ -16,3 +12,12 @@ minimumReleaseAgeExclude:
   - '@typescript-eslint/utils@8.69.0'
   - '@typescript-eslint/visitor-keys@8.69.0'
   - typescript-eslint@8.69.0
+
+# esbuild links its platform binary from a postinstall script; drizzle-kit
+# cannot load a config file without it. The rest are optional native speedups
+# for the Testcontainers SSH path that the pure-JS fallbacks already cover.
+allowBuilds:
+  cpu-features: false
+  esbuild: true
+  protobufjs: false
+  ssh2: false

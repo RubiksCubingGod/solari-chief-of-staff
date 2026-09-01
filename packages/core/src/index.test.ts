@@ -2,17 +2,31 @@ import { describe, expect, it } from 'vitest';
 
 import {
   CALENDAR_ITEM_KINDS,
+  CALENDAR_ITEM_STATUSES,
+  FETCH_TIERS,
+  MESSAGE_CHANNELS,
+  MESSAGE_DIRECTIONS,
+  SITE_CONNECTION_STATUSES,
   TASK_EVENT_TYPES,
   TASK_KINDS,
   TASK_MODES,
   TASK_STATUSES,
+  TIER_POLICIES,
   WATCH_KINDS,
+  WATCH_STATUSES,
   isCalendarItemKind,
+  isCalendarItemStatus,
+  isFetchTier,
+  isMessageChannel,
+  isMessageDirection,
+  isSiteConnectionStatus,
   isTaskEventType,
   isTaskKind,
   isTaskMode,
   isTaskStatus,
+  isTierPolicy,
   isWatchKind,
+  isWatchStatus,
   memberGuard,
 } from './index.js';
 
@@ -42,6 +56,17 @@ describe('domain vocabulary', () => {
     { name: 'TASK_MODES', values: TASK_MODES, guard: isTaskMode },
     { name: 'TASK_EVENT_TYPES', values: TASK_EVENT_TYPES, guard: isTaskEventType },
     { name: 'CALENDAR_ITEM_KINDS', values: CALENDAR_ITEM_KINDS, guard: isCalendarItemKind },
+    { name: 'WATCH_STATUSES', values: WATCH_STATUSES, guard: isWatchStatus },
+    { name: 'FETCH_TIERS', values: FETCH_TIERS, guard: isFetchTier },
+    { name: 'TIER_POLICIES', values: TIER_POLICIES, guard: isTierPolicy },
+    {
+      name: 'SITE_CONNECTION_STATUSES',
+      values: SITE_CONNECTION_STATUSES,
+      guard: isSiteConnectionStatus,
+    },
+    { name: 'CALENDAR_ITEM_STATUSES', values: CALENDAR_ITEM_STATUSES, guard: isCalendarItemStatus },
+    { name: 'MESSAGE_DIRECTIONS', values: MESSAGE_DIRECTIONS, guard: isMessageDirection },
+    { name: 'MESSAGE_CHANNELS', values: MESSAGE_CHANNELS, guard: isMessageChannel },
   ] as const satisfies readonly {
     name: string;
     values: readonly string[];

@@ -14,14 +14,17 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc --build"
+    "build": "tsc --build",
+    "generate": "drizzle-kit generate"
   },
   "dependencies": {
+    "@chief-of-staff/core": "workspace:*",
     "drizzle-orm": "0.45.2",
     "pg": "8.23.0"
   },
   "devDependencies": {
     "@testcontainers/postgresql": "12.1.0",
-    "@types/pg": "^8.23.1"
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "0.31.10"
   }
 }

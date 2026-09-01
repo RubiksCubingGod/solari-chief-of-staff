@@ -6,10 +6,16 @@
     "composite": false,
     "declaration": false,
     "declarationMap": false,
-    "sourceMap": false
+    "sourceMap": false,
+    "paths": {
+      "@chief-of-staff/*": [
+        "./packages/*/src/index.ts"
+      ]
+    }
   },
   "include": [
     "packages/*/src/**/*.ts",
+    "packages/*/*.config.ts",
     "tests/**/*.ts",
     "*.config.ts"
   ]

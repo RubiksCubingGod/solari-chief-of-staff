@@ -15,5 +15,9 @@
   ],
   "scripts": {
     "build": "tsc --build"
+  },
+  "dependencies": {
+    "@chief-of-staff/core": "workspace:*",
+    "@chief-of-staff/db": "workspace:*"
   }
 }

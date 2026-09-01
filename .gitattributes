@@ -1,0 +1,12 @@
+# Check every text file out with LF on every platform. Two things in this repo
+# hash file bytes and would otherwise disagree across a Windows and a Linux
+# clone: Drizzle stores a hash of each migration SQL file in
+# `drizzle.__drizzle_migrations`, so a CRLF checkout would re-apply migrations
+# that a LF checkout had already applied; and the NAH ledgers under `.nah/`
+# are parsed line-by-line.
+* text=auto eol=lf
+
+# Lockfiles and generated migration SQL are reviewed, not merged by hand.
+pnpm-lock.yaml linguist-generated=true -diff
+packages/db/drizzle/**/*.sql linguist-generated=true
+packages/db/drizzle/meta/** linguist-generated=true -diff
