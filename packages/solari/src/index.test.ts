@@ -19,7 +19,10 @@ describe('@chief-of-staff/solari', () => {
   it('exports nothing else at runtime, so the surface stays the reviewed one', () => {
     expect(Object.keys(solari).sort()).toEqual([
       'BrowserProviderError',
+      'PROXY_COUNTRIES',
+      'STICKY_DURATION_MINUTES',
       'createLocalProvider',
+      'createSolariProvider',
       'reportReleaseFailureToConsole',
       'withBrowser',
     ]);

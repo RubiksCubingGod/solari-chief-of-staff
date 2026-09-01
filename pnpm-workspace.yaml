@@ -13,6 +13,7 @@ minimumReleaseAgeExclude:
   - '@typescript-eslint/utils@8.69.0'
   - '@typescript-eslint/visitor-keys@8.69.0'
   - typescript-eslint@8.69.0
+  - '@solarisdk/browser@0.1.2'
 
 # esbuild links its platform binary from a postinstall script; drizzle-kit
 # cannot load a config file without it. The rest are optional native speedups
