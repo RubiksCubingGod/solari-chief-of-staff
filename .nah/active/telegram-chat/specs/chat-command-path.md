@@ -22,13 +22,17 @@ origin:
 A bound user says "watch this product and tell me if it drops under $20" with a URL; the tool
 loop calls the watch-create tool (thin wrapper over the s1 CRUD route); the watch exists via
 the API; the reply confirms with the created watch's identity. List and pause requests work the
-same way through their tools. The loop is budgeted (max tool calls per message) and every
+same way through their tools, and "cancel my gym" lands a queued cancellation task row through
+the task-create tool (the row waits for the s5 engine; the reply says it is queued - this
+sprint stays engine-free). The loop is budgeted (max tool calls per message) and every
 message pair lands in the transcript.
 
 ## Path
 
 Telegram update → grammY → binding resolution → rate-limit check → Claude tool loop (Zod tools:
-watch create/list/pause, calendar create/list, task status read) → CRUD API call → reply.
+watch create/list/pause, calendar create/list, task create and status read) → CRUD API call →
+reply. An ambiguous order ("cancel my gym" with two gym connections) makes the loop ask which
+one rather than guess.
 Refused states, each with a distinct polite reply and no side effects: unbound chat (one
 how-to-bind reply), rate-limited, tool-budget exhausted, and a request no tool fits (the loop
 must say so, not invent an action).

@@ -20,7 +20,8 @@ transport against a stub question record.
 - grammY runtime, long-polling in dev, webhook-ready config for production (activated at
   challenge-launch). CI proofs use grammY's test transport — no network, no live bot.
 - One Claude tool loop (Anthropic tool runner + Zod tools) per incoming message, with tool
-  wrappers for: watch create/list/pause, calendar item create/list, task status read. The loop
+  wrappers for: watch create/list/pause, calendar item create/list, task create ("cancel my
+  gym" lands a queued task row; execution is s5's) and status read. The loop
   has a hard tool-call budget per message. CI proofs script the LLM (mocked tool-runner
   transcripts); one tagged @live-llm test exercises a real Claude call.
 - Binding: the API issues a one-time code (consumed later by dashboard/CLI); the user sends

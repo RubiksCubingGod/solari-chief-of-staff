@@ -191,7 +191,7 @@ sprints:
     alias: s9
     owner: RubiksCubingGod
     wall_hours_estimate: 21
-    estimated_task_count: 5
+    estimated_task_count: 6
     average_task_agent_hours: 3
     release:
       outcome: The system proven against 2-3 chosen real sites with real watches and playbooks,

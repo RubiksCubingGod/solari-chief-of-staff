@@ -4,6 +4,8 @@
 |---|---|---|---|
 | Onboarding records complete per site: tier, ToS check, cost, budget, anomalies | real-watch-proof | committed evidence | once per site |
 | Three days of real observation series; delivered change notification; drift episode resolved | real-watch-proof | committed evidence + dashboard | during hardening |
+| Connect-flow state transitions, bookkeeping, abandoned timeout, expiry flip, chat link | site-connect-path | integration (scripted provider) | every push |
+| Live connect of one real site via live-view; mission runs authenticated; reconnect exercised | site-connect-path | committed evidence (live run) | during hardening |
 | Real cancellation: service-confirmed, full trail, replay, decline run, zero leaked sessions | real-action-proof | committed evidence (live run) | during hardening |
 | Fixture-analogue rehearsal of the real playbook | real-action-proof | integration (fixtures, LocalProvider) | every push |
 | Nightly suite: all case classes report pass/failed/errored distinctly; broken case → red night + Telegram ops alert | live-ops-gate | live workflow | nightly |

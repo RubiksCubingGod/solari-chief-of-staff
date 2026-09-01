@@ -7,6 +7,7 @@
 | Binding accepted path; expired/unknown/consumed/rebind refusals; consume+bind atomicity | account-binding | integration (Testcontainers) | every push |
 | Unbound chatter → single how-to-bind reply | account-binding | integration | every push |
 | NL → watch create/list/pause with API-visible effects (scripted LLM) | chat-command-path | integration | every push |
+| "Cancel my gym" → queued task row + queued-confirming reply; ambiguous order asks back | chat-command-path | integration | every push |
 | Budget exhaustion, no-tool-fits, CRUD 4xx passthrough, LLM outage | chat-command-path | integration | every push |
 | Pending question answer → stub sink; normal chat → loop; exactly one destination | bot-io-runtime | integration | every push |
 | sendToUser delivery record + test-transport arrival; unbound typed error; failed delivery recorded | bot-io-runtime | integration | every push |

@@ -28,6 +28,11 @@ what is new (site onboarding as a repeatable procedure, the live ops gate) exist
 - **Real actions stay low-stakes and reversible**: the real action proof targets an account we
   own on a service chosen for easy re-subscription; the payment gate and confirm posture stay
   exactly as in s5/s7 - no real-site exception flags.
+- **Logins go through Solari profiles, never stored passwords**: this sprint lands the
+  architecture §4 connect flow - the user logs in themselves inside a watchable live-view
+  session, we save only the profile id, and expiry surfaces a reconnect link. Fixtures never
+  needed this (seeded credentials); real sites do, so it lands here, where the first real
+  login exists.
 - **Three consecutive nights is calendar time**: the gate is three green nightly live runs in
   a row, recorded; wall-hour estimates cover the work, not the waiting.
 - **Cost is a release criterion**: per-task Solari + Anthropic cost logged (s6 machinery)
@@ -39,6 +44,8 @@ what is new (site onboarding as a repeatable procedure, the live ops gate) exist
   change event, notification, self-heal on drift.
 - `specs/real-action-proof.md` (vertical) - one real consequential action executed under full
   guardrails with recording and audit trail.
+- `specs/site-connect-path.md` (vertical) - connect a real site by logging in yourself in a
+  live-view Solari session; only the profile id is stored, expiry offers reconnect.
 - `specs/live-ops-gate.md` (horizontal) - the nightly live suite expanded to real sites, cost
   accounting per run, and the attested release checklist.
 
@@ -56,4 +63,5 @@ what is new (site onboarding as a repeatable procedure, the live ops gate) exist
 
 ## Task waves
 
-[site-onboarding] → [real-watches, real-action] → [live-suite-expansion] → [cost-and-checklist]
+[site-onboarding, site-connect-flow] → [real-watches, real-action] → [live-suite-expansion] →
+[cost-and-checklist]
