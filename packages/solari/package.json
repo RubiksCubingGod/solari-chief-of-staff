@@ -15,5 +15,8 @@
   ],
   "scripts": {
     "build": "tsc --build"
+  },
+  "dependencies": {
+    "playwright": "1.62.1"
   }
 }
