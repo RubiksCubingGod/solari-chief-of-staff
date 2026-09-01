@@ -1,0 +1,122 @@
+schema_version: 1
+runner:
+  mode: single-session
+  profile: portable-default
+harnesses:
+  codex:
+    executable: codex
+  claude-code:
+    executable: claude
+    auto_compact_window: 250000
+skills:
+  unblock: nah://skill/nah-unblock
+  architecture: nah://skill/nah-architecture
+stages:
+  planning:
+    require_replan_approval: false
+  hardening:
+    repair_mode: delegate
+    max_rounds: 3
+  review:
+    delivery:
+      provider: local
+      directory: .nah/delivery
+      publish_drafts: false
+resolution:
+  steps:
+    - kind: reconcile
+    - kind: current-attempt
+    - kind: agent
+      profile: unblock
+    - kind: agent
+      profile: architecture
+  retryable_kinds:
+    - resource-pressure
+    - live-owner
+  external_kinds:
+    - credential
+    - decision
+    - external-service
+  attempts:
+    unblock:
+      max_elapsed: 30m
+      max_tool_calls: 40
+    architecture:
+      max_elapsed: 45m
+      max_tool_calls: 60
+workspace:
+  default: shared
+  worktree_root: ../{repository}-{sprint}
+project_management:
+  provider: unconfigured
+  writes_enabled: false
+  source:
+    repository_url: https://example.invalid/chief-of-staff
+    branch: main
+  identities: []
+  providers:
+    unconfigured:
+      organization_id: unconfigured-organization
+      team_id: unconfigured-team
+      credential_env: NAH_PROJECT_MANAGEMENT_TOKEN
+      project_states:
+        planned: project-planned
+        active: project-active
+        done: project-done
+      issue_states:
+        backlog: issue-backlog
+        todo: issue-todo
+        active: issue-active
+        review: issue-review
+        done: issue-done
+      labels:
+        project_managed:
+          name: nah-synced
+          id: null
+        issue_managed:
+          name: nah-synced
+          id: null
+        issue_blocked:
+          name: nah-blocked
+          id: null
+profiles:
+  portable-default:
+    planning:
+      model: gpt-5.6-sol
+      effort: high
+      harness: codex
+    implementation:
+      model: claude-opus-5
+      harness: claude-code
+      permissions:
+        permission_mode: bypassPermissions
+    hardening:
+      model: gpt-5.6-terra
+      effort: xhigh
+      harness: codex
+    review:
+      model: gpt-5.6-terra
+      effort: xhigh
+      harness: codex
+    unblock:
+      model: gpt-5.6-sol
+      effort: high
+      harness: codex
+    architecture:
+      model: gpt-5.6-sol
+      effort: max
+      harness: codex
+retry:
+  resource_pressure:
+    delays:
+      - 10m
+      - 60m
+      - 180m
+    repeat_last: true
+    max_elapsed: 12h
+    deterministic_jitter_percent: 10
+capacity:
+  memory_available_min_mb: 4096
+  observation_max_age: 30s
+estimation:
+  hardening_ratio: 0.3

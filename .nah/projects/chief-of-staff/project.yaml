@@ -1,0 +1,20 @@
+schema_version: 1
+id: chief-of-staff
+status: planning
+goal: A deployed, tested personal chief-of-staff agent - watches, deadline calendar wired to
+  actions, subscription cancellation, Telegram interface, dashboard with replays - demoed on real
+  sites and published with the Solari challenge launch post.
+owners:
+  - RubiksCubingGod
+clients: []
+context: []
+research: []
+backlog: []
+project_management:
+  links: []
+systems: []
+sprints: []
+dependency_graph:
+  edges: []
+  unresolved: []
+open_decisions: []
