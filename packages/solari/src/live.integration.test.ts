@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   API_KEY_VARIABLE,
   liveSmokeSkipReason,
+  liveSuiteName,
   REPLAY_POLL_TIMEOUT_MS,
   runLiveSmoke,
 } from './live-smoke.js';
@@ -22,13 +23,11 @@ import {
 const skipReason = liveSmokeSkipReason(process.env);
 
 /**
- * The reason rides in the suite name so the ordinary run reports *why* it
- * skipped rather than reporting nothing. The spec's rule is that a missing
- * secret must read as skipped and never as green; a nameless skip is halfway
- * back to silent.
+ * The tag and the skip reason both ride in the suite name: the tag so `vitest -t
+ * @live` can select the tier the spec asks for, the reason so the ordinary run
+ * reports *why* it skipped rather than reporting nothing.
  */
-const suiteName =
-  skipReason === undefined ? 'the Solari live smoke' : `the Solari live smoke — ${skipReason}`;
+const suiteName = liveSuiteName(skipReason);
 
 /** Launch, navigate, flush, release, then poll the replay through its 404 window. */
 const LIVE_SMOKE_TIMEOUT_MS = REPLAY_POLL_TIMEOUT_MS + 150_000;

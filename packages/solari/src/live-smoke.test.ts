@@ -8,8 +8,10 @@ import {
   API_KEY_VARIABLE,
   LIVE_SMOKE_FLAG,
   liveSmokeSkipReason,
+  liveSuiteName,
   pollReplayUrl,
   probeReplayBody,
+  runTeardowns,
   type ReplayReader,
 } from './live-smoke.js';
 
@@ -228,5 +230,84 @@ describe('probeReplayBody', () => {
     });
 
     await expect(probeReplayBody(host.url)).rejects.toThrow('answered 403');
+  });
+});
+
+/**
+ * The teardown discipline, proven where it is decided.
+ *
+ * `runLiveSmoke` tears down two independent vendor objects, and the shape of
+ * that teardown is the difference between a nightly that fails and a nightly
+ * that hangs. The decision lives in `runTeardowns` so it can be driven here
+ * rather than only ever by the vendor at 07:17.
+ */
+
+function failing(what: string, error: Error): { what: string; run: () => Promise<void> } {
+  return { what, run: () => Promise.reject(error) };
+}
+
+describe('runTeardowns', () => {
+  it('runs every teardown even when an earlier one throws', async () => {
+    // The defect this exists to prevent: `await dispose(); await close();` in a
+    // finally never reaches `close()` once `dispose()` throws, so the SDK proxy
+    // thread outlives the process and CI reports a timeout instead of a failure.
+    const ran: string[] = [];
+
+    await runTeardowns([
+      { what: 'dispose', run: () => { ran.push('dispose'); return Promise.reject(new Error('boom')); } },
+      { what: 'close', run: () => { ran.push('close'); return Promise.resolve(); } },
+    ]);
+
+    expect(ran).toEqual(['dispose', 'close']);
+  });
+
+  it('reports each failure with the label of what failed', async () => {
+    const failures = await runTeardowns([
+      failing('dispose', new Error('slot stuck')),
+      failing('close', new Error('proxy stuck')),
+    ]);
+
+    expect(failures.map((f) => f.what)).toEqual(['dispose', 'close']);
+    expect(failures.map((f) => (f.error as Error).message)).toEqual(['slot stuck', 'proxy stuck']);
+  });
+
+  it('reports nothing when every teardown succeeds', async () => {
+    const failures = await runTeardowns([
+      { what: 'dispose', run: () => Promise.resolve() },
+      { what: 'close', run: () => Promise.resolve() },
+    ]);
+
+    expect(failures).toEqual([]);
+  });
+});
+
+describe('pollReplayUrl deadline', () => {
+  it('gives up near its own deadline when a single attempt never settles', async () => {
+    // The budget is 30s in production, and one `getReplayUrl` is allowed 90s by
+    // the SDK default. Checking the deadline only *between* attempts lets one
+    // hung call overshoot the window it claims to hold by three times.
+    const hangs: ReplayReader = { getReplayUrl: () => new Promise(() => undefined) };
+
+    const started = Date.now();
+    await expect(pollReplayUrl(hangs, 'session-hang', { timeoutMs: 200, intervalMs: 1 })).rejects.toThrow(
+      /session-hang/u,
+    );
+
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+});
+
+describe('liveSuiteName', () => {
+  it('carries the @live tag so the tier can be selected by name', () => {
+    // `live-smoke-path.md` asks for an @live-tagged suite and TEST-MATRIX.md
+    // declares the tier; `packages/agent` already tags its own live suite.
+    expect(liveSuiteName(undefined)).toContain('@live');
+  });
+
+  it('keeps the tag when it also has to carry a skip reason', () => {
+    const name = liveSuiteName('SOLARI_LIVE_SMOKE is not set');
+
+    expect(name).toContain('@live');
+    expect(name).toContain('SOLARI_LIVE_SMOKE is not set');
   });
 });

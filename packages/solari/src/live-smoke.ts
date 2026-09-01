@@ -88,6 +88,7 @@ export interface LiveSmokeOptions {
   readonly apiKey: string;
   readonly url?: string;
   readonly flushMs?: number;
+  readonly onTeardownFailure?: TeardownFailureSink;
 }
 
 /**
@@ -143,6 +144,31 @@ export interface ReplayReader {
   getReplayUrl(id: string): Promise<{ url: string; contentEncoding: string }>;
 }
 
+/** What {@link expiresIn} resolves to when the window closes first. */
+const EXPIRED = 'expired';
+
+/**
+ * A timer that loses its race silently.
+ *
+ * `Promise.race` settles on the winner but does not cancel the loser, so a
+ * plain rejecting timer becomes an unhandled rejection every time the work it
+ * guards arrives first. Cancelling leaves it permanently pending instead, which
+ * is the correct shape for a loser nobody is waiting on any more.
+ */
+function expiresIn(ms: number): { readonly expired: Promise<typeof EXPIRED>; readonly cancel: () => void } {
+  const controller = new AbortController();
+  const expired = delay<typeof EXPIRED>(ms, EXPIRED, { signal: controller.signal }).catch(
+    () => new Promise<never>(() => undefined),
+  );
+
+  return {
+    expired,
+    cancel: () => {
+      controller.abort();
+    },
+  };
+}
+
 export interface ReplayPollOptions {
   readonly timeoutMs?: number;
   readonly intervalMs?: number;
@@ -167,16 +193,36 @@ export async function pollReplayUrl(
   const intervalMs = options.intervalMs ?? REPLAY_POLL_INTERVAL_MS;
   const deadline = Date.now() + timeoutMs;
   let attempts = 0;
-  let lastError: unknown;
+  let lastError: unknown = new Error(
+    `no attempt completed inside the ${String(timeoutMs)}ms window`,
+  );
 
   for (;;) {
     attempts += 1;
-    try {
-      const replay = await reader.getReplayUrl(sessionId);
-      return { url: replay.url, contentEncoding: replay.contentEncoding, attempts };
-    } catch (error) {
-      if (statusOf(error) !== REPLAY_NOT_READY) throw error;
-      lastError = error;
+    const remaining = deadline - Date.now();
+
+    if (remaining > 0) {
+      // Race the attempt against what is left of the window. Checking the
+      // deadline only *between* attempts is how a poll that promises thirty
+      // seconds spends ninety inside one hung call to a vendor that never
+      // answers, and the caller who read the constant is none the wiser.
+      const timer = expiresIn(remaining);
+      try {
+        const outcome = await Promise.race([
+          reader.getReplayUrl(sessionId).then((found) => ({ found }) as const),
+          timer.expired,
+        ]);
+
+        if (outcome !== EXPIRED) {
+          return { url: outcome.found.url, contentEncoding: outcome.found.contentEncoding, attempts };
+        }
+        lastError = new Error(`attempt ${String(attempts)} was still in flight when the window closed`);
+      } catch (error) {
+        if (statusOf(error) !== REPLAY_NOT_READY) throw error;
+        lastError = error;
+      } finally {
+        timer.cancel();
+      }
     }
 
     if (Date.now() >= deadline) {
@@ -216,23 +262,107 @@ export async function probeReplayBody(url: string): Promise<ReplayBody> {
   return { shape: gzipped ? 'gzip' : 'ndjson', responseEncoding, bytes: body.byteLength };
 }
 
+/** One thing that has to be undone, and the name to blame when undoing it fails. */
+export interface Teardown {
+  readonly what: string;
+  readonly run: () => Promise<void>;
+}
+
+export interface TeardownFailure {
+  readonly what: string;
+  readonly error: unknown;
+}
+
+export type TeardownFailureSink = (failure: TeardownFailure) => void;
+
+/** Writes to stderr, so an unreported teardown failure is visible by default. */
+export const reportTeardownFailureToConsole: TeardownFailureSink = ({ what, error }) => {
+  console.error(`the live smoke could not complete ${what}`, error);
+};
+
+/**
+ * Run every teardown, whichever of them fail, and hand the failures back.
+ *
+ * The naive shape — `await dispose(); await close();` in a `finally` — has two
+ * bugs and they compound. A throwing `dispose()` never reaches `close()`, so
+ * the SDK's local proxy thread outlives the work and the Node process hangs
+ * rather than exiting: in CI that is a twenty-minute timeout wearing the wrong
+ * failure's name. And because it throws *out of the finally*, it replaces
+ * whatever the body was failing with, which is the error someone could have
+ * acted on.
+ *
+ * Failures come back rather than being thrown because who should win depends on
+ * why we are tearing down, and only the caller knows that. Sequential, not
+ * `allSettled`: `dispose()` releases the session and `close()` stops the proxy
+ * that was serving it, and that order is the one {@link withBrowser} and the
+ * session-hygiene spec both describe.
+ */
+export async function runTeardowns(teardowns: readonly Teardown[]): Promise<TeardownFailure[]> {
+  const failures: TeardownFailure[] = [];
+
+  for (const teardown of teardowns) {
+    try {
+      await teardown.run();
+    } catch (error) {
+      failures.push({ what: teardown.what, error });
+    }
+  }
+
+  return failures;
+}
+
+/** The tag the `@live` tier is selected by, here and in `packages/agent`. */
+export const LIVE_SUITE_TAG = '@live';
+
+/**
+ * The name the live suite reports under.
+ *
+ * The tag rides in the name because that is what `vitest -t` matches on, which
+ * is how `live-smoke-path.md` asks for the tier to be selectable and how
+ * `packages/agent/src/live-llm.integration.test.ts` already spells it. The skip
+ * reason rides there too: the spec's rule is that a missing secret reads as
+ * skipped and never as green, and a nameless skip is halfway back to silent.
+ */
+export function liveSuiteName(skipReason: string | undefined): string {
+  const name = `the Solari live smoke ${LIVE_SUITE_TAG}`;
+  return skipReason === undefined ? name : `${name} — ${skipReason}`;
+}
+
 /**
  * The whole composed vendor path, once.
  *
  * Two vendor clients are built, deliberately. The provider gets its own,
  * because that is the object under test. The replay is read through a second,
  * launch-free client because replay is a Solari artifact and not part of the
- * {@link import('./provider.js').BrowserProvider} contract — widening the seam,
+ * {@link import('./provider.js').BrowserProvider} contract - widening the seam,
  * or the adapter's injected-client surface, for one nightly caller would let a
  * vendor-shaped concern leak into the interface every engine depends on. The
- * second client creates no session and so costs nothing beyond one GET.
+ * second client creates no session and so costs nothing beyond one GET, and it
+ * is given the poll's own budget rather than the SDK's 90s default, so a single
+ * unanswered call cannot outlive the window {@link pollReplayUrl} advertises.
+ *
+ * Teardown follows {@link withBrowser}: on the failure path the body's error is
+ * what propagates and teardown failures are reported, because the body's error
+ * is the one the caller can act on; on the success path a teardown failure is
+ * itself the finding, since a held slot or a surviving proxy thread is exactly
+ * what this smoke exists to notice.
  */
 export async function runLiveSmoke(options: LiveSmokeOptions): Promise<LiveSmokeReport> {
   const url = options.url ?? SMOKE_URL;
   const flushMs = options.flushMs ?? RRWEB_FLUSH_MS;
 
   const provider = createSolariProvider({ apiKey: options.apiKey });
-  const replayClient = createSolariClient({ apiKey: options.apiKey });
+  const replayClient = createSolariClient({
+    apiKey: options.apiKey,
+    timeoutMs: REPLAY_POLL_TIMEOUT_MS,
+  });
+
+  const teardowns: readonly Teardown[] = [
+    { what: 'provider.dispose()', run: () => provider.dispose() },
+    { what: 'solari.close()', run: () => replayClient.close() },
+  ];
+
+  let report: LiveSmokeReport;
 
   try {
     let sessionId: string | undefined;
@@ -262,7 +392,7 @@ export async function runLiveSmoke(options: LiveSmokeOptions): Promise<LiveSmoke
     const replay = await pollReplayUrl(replayClient.sessions, sessionId);
     const body = await probeReplayBody(replay.url);
 
-    return {
+    report = {
       sessionId,
       title,
       replayUrl: replay.url,
@@ -273,11 +403,20 @@ export async function runLiveSmoke(options: LiveSmokeOptions): Promise<LiveSmoke
       replayBytes: body.bytes,
       liveSessionIdsAfterRelease,
     };
-  } finally {
-    // Both, always, in a finally: `dispose()` releases anything still held, and
-    // the SDK's `close()` stops the local proxy thread. Skipping the latter is
-    // how a Node process that has finished its work hangs anyway.
-    await provider.dispose();
-    await replayClient.close();
+  } catch (bodyError) {
+    const sink = options.onTeardownFailure ?? reportTeardownFailureToConsole;
+    for (const failure of await runTeardowns(teardowns)) sink(failure);
+    throw bodyError;
   }
+
+  const failures = await runTeardowns(teardowns);
+  if (failures.length > 0) {
+    throw new Error(
+      `the live smoke reached the end of its path but could not tear down: ${failures
+        .map((failure) => `${failure.what}: ${describeError(failure.error)}`)
+        .join('; ')}`,
+    );
+  }
+
+  return report;
 }
