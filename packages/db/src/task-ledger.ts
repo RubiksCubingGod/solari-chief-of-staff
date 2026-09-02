@@ -11,6 +11,7 @@ import {
   type TransitionCause,
   type TransitionEventPayload,
   type UserReplyEventPayload,
+  type UserResolutionOutcome,
 } from '@chief-of-staff/core';
 import { asc, eq } from 'drizzle-orm';
 import type { NodePgQueryResultHKT } from 'drizzle-orm/node-postgres';
@@ -347,19 +348,51 @@ export interface TaskReply {
   readonly reply: string;
 }
 
-export type AnswerOutcome =
-  | { readonly accepted: true }
-  | {
-      readonly accepted: false;
-      readonly reason: Exclude<RejectionReason, 'illegal'> | 'not_found';
-    };
+/** What became of an answer or a decline: the port's own outcome type, so a channel sees one shape. */
+export type AnswerOutcome = UserResolutionOutcome;
+
+type Refusal = Extract<AnswerOutcome, { readonly accepted: false }>;
+
+/**
+ * The checks an answer and a decline share, under the caller's row lock: the
+ * task is parked, it is parked on this question, and the deadline has not
+ * passed. Each failure is recorded as a `rejected` event naming what was
+ * attempted. The last check also expires the question on the spot: the person
+ * was late, and the trail should say the deadline passed before it says they
+ * tried.
+ */
+async function openQuestion(
+  tx: TaskDatabase,
+  task: Task,
+  questionId: string,
+  attempted: 'answered' | 'declined',
+  detail: unknown,
+  now: Date,
+): Promise<AskUserEventPayload | Refusal> {
+  if (task.status !== 'waiting_user') {
+    await rejectWithin(tx, task, attempted, 'not_waiting', detail);
+    return { accepted: false, reason: 'not_waiting' };
+  }
+  const question = lastQuestion(await eventsOf(tx, task.id));
+  if (question === undefined || question.questionId !== questionId) {
+    await rejectWithin(tx, task, attempted, 'unknown_question', detail);
+    return { accepted: false, reason: 'unknown_question' };
+  }
+  if (Date.parse(question.expiresAt) <= now.getTime()) {
+    const failed = await moveWithin(tx, task, 'timeout', {
+      questionId: question.questionId,
+      expiresAt: question.expiresAt,
+    });
+    await rejectWithin(tx, failed, attempted, 'expired', detail);
+    return { accepted: false, reason: 'expired' };
+  }
+  return question;
+}
 
 /**
  * Accepts an answer to the question a task is parked on and queues the task
  * to run again. Anything else - a task not waiting, a question that is not
- * the pending one, an answer past the deadline - is refused and recorded. The
- * last of those also expires the question on the spot: the person was late,
- * and the trail should say the deadline passed before it says they tried.
+ * the pending one, an answer past the deadline - is refused and recorded.
  */
 export async function answerTask(
   ledger: TaskLedger,
@@ -371,23 +404,8 @@ export async function answerTask(
     const task = await lockTask(tx, taskId);
     if (task === undefined) return { accepted: false, reason: 'not_found' };
     const detail = { questionId: reply.questionId, reply: reply.reply };
-    if (task.status !== 'waiting_user') {
-      await rejectWithin(tx, task, 'answered', 'not_waiting', detail);
-      return { accepted: false, reason: 'not_waiting' };
-    }
-    const question = lastQuestion(await eventsOf(tx, taskId));
-    if (question === undefined || question.questionId !== reply.questionId) {
-      await rejectWithin(tx, task, 'answered', 'unknown_question', detail);
-      return { accepted: false, reason: 'unknown_question' };
-    }
-    if (Date.parse(question.expiresAt) <= now.getTime()) {
-      const failed = await moveWithin(tx, task, 'timeout', {
-        questionId: question.questionId,
-        expiresAt: question.expiresAt,
-      });
-      await rejectWithin(tx, failed, 'answered', 'expired', detail);
-      return { accepted: false, reason: 'expired' };
-    }
+    const question = await openQuestion(tx, task, reply.questionId, 'answered', detail, now);
+    if ('accepted' in question) return question;
     const accepted: UserReplyEventPayload = {
       questionId: question.questionId,
       reply: reply.reply,
@@ -402,6 +420,34 @@ export async function answerTask(
   // sweep exists to pick up.
   if (outcome.accepted) await enqueueTaskRun(ledger, taskId);
   return outcome;
+}
+
+export interface TaskDecline {
+  readonly questionId: string;
+}
+
+/**
+ * Cancels a task on the person's say-so. A decline is a transition, not an
+ * answer: nothing is written for a mission to read back, because no mission
+ * runs again. The same checks as an answer apply and the same refusals are
+ * recorded, so a decline for the wrong question, or after the deadline, is
+ * turned away rather than cancelling something the person did not mean.
+ */
+export function declineTask(
+  db: TaskDatabase,
+  taskId: string,
+  decline: TaskDecline,
+  now: Date = new Date(),
+): Promise<AnswerOutcome> {
+  return db.transaction(async (tx): Promise<AnswerOutcome> => {
+    const task = await lockTask(tx, taskId);
+    if (task === undefined) return { accepted: false, reason: 'not_found' };
+    const detail = { questionId: decline.questionId };
+    const question = await openQuestion(tx, task, decline.questionId, 'declined', detail, now);
+    if ('accepted' in question) return question;
+    await moveWithin(tx, task, 'declined', { questionId: question.questionId });
+    return { accepted: true };
+  });
 }
 
 /**

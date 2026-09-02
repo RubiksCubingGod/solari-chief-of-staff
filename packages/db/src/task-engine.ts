@@ -1,4 +1,4 @@
-import type { StepEventPayload } from '@chief-of-staff/core';
+import type { StepEventPayload, UserIO, UserQuestion } from '@chief-of-staff/core';
 import { inArray } from 'drizzle-orm';
 
 import type { JobRegistration } from './jobs.js';
@@ -62,6 +62,13 @@ export type Mission = (context: MissionContext) => Promise<MissionOutcome>;
 export interface TaskEngineOptions {
   readonly db: TaskDatabase;
   readonly mission: Mission;
+  /**
+   * Who puts a parked task's question in front of its person. Without one,
+   * questions are only on the row - findable through the API and the
+   * dashboard, delivered to nobody - which is a worker fit for proofs of the
+   * machine and not for production.
+   */
+  readonly userIO?: UserIO;
   /** How long a question stays open before the task fails by `timeout`. */
   readonly waitingUserTimeoutMs?: number;
   readonly now?: () => Date;
@@ -112,21 +119,21 @@ export async function runTaskJob(
   } catch (error: unknown) {
     outcome = { kind: 'failed', cause: 'error', reason: describe(error) };
   }
-  await settle(ledger, options, job.taskId, outcome);
+  await settle(ledger, options, claim.task, outcome);
 }
 
 async function settle(
   ledger: TaskLedger,
   options: TaskEngineOptions,
-  taskId: string,
+  task: Task,
   outcome: MissionOutcome,
 ): Promise<void> {
   switch (outcome.kind) {
     case 'succeeded':
-      await transitionTask(ledger.db, taskId, { cause: 'succeeded', result: outcome.result ?? null });
+      await transitionTask(ledger.db, task.id, { cause: 'succeeded', result: outcome.result ?? null });
       return;
     case 'failed':
-      await transitionTask(ledger.db, taskId, {
+      await transitionTask(ledger.db, task.id, {
         cause: outcome.cause ?? 'error',
         detail:
           outcome.detail === undefined
@@ -137,12 +144,34 @@ async function settle(
     case 'ask': {
       const now = (options.now ?? (() => new Date()))();
       const timeout = options.waitingUserTimeoutMs ?? DEFAULT_WAITING_USER_TIMEOUT_MS;
-      await askUser(ledger, taskId, {
+      const asked = await askUser(ledger, task.id, {
         question: outcome.question,
         expiresAt: new Date(now.getTime() + timeout),
       });
+      if (!asked.ok || options.userIO === undefined) return;
+      await deliver(ledger, options.userIO, { taskId: task.id, userId: task.userId, ...asked.question });
       return;
     }
+  }
+}
+
+/**
+ * Puts the question in front of the person, after it is on the row. A
+ * delivery that fails loses nothing but the delivery: the question and its
+ * deadline are committed, the dashboard can still show it, and the deadline
+ * still fails the task if nobody finds it. The failure goes on the trail so a
+ * task that timed out unanswered can be told apart from one nobody was asked.
+ */
+async function deliver(ledger: TaskLedger, userIO: UserIO, question: UserQuestion): Promise<void> {
+  try {
+    await userIO.ask(question);
+  } catch (error: unknown) {
+    const failure: StepEventPayload = {
+      name: 'deliver_question',
+      outcome: 'failed',
+      detail: describe(error),
+    };
+    await appendTaskEvent(ledger.db, question.taskId, 'step', failure);
   }
 }
 

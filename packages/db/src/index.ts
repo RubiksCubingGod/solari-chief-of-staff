@@ -36,6 +36,7 @@ export {
   appendTaskEvent,
   askUser,
   claimTaskRun,
+  declineTask,
   enqueueTaskRun,
   expireQuestion,
   orphanTask,
@@ -49,6 +50,7 @@ export {
   type EnqueueOutcome,
   type TaskAnswer,
   type TaskDatabase,
+  type TaskDecline,
   type TaskLedger,
   type TaskReply,
   type TaskRunJob,
@@ -57,4 +59,5 @@ export {
   type TransitionOutcome,
   type TransitionRequest,
 } from './task-ledger.js';
+export { createUserAnswerSink } from './user-io.js';
 export { startWorker, type WorkerProcess } from './worker.js';
