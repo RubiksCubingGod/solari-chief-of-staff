@@ -64,6 +64,9 @@ importers:
       '@chief-of-staff/db':
         specifier: workspace:*
         version: link:../db
+      '@chief-of-staff/fixtures':
+        specifier: workspace:*
+        version: link:../../fixtures
 
   packages/api:
     dependencies:

@@ -29,6 +29,21 @@ export {
   type HttpCrudClientOptions,
 } from './crud.js';
 export {
+  EXTRACTOR_FAILURES,
+  EXTRACTOR_MAX_TOKENS,
+  EXTRACTOR_MODEL,
+  PROPOSE_EXTRACTOR_TOOL,
+  createExtractorCreator,
+  describeCreationFailure,
+  provisionExtractor,
+  type ExtractorCreation,
+  type ExtractorCreator,
+  type ExtractorCreatorOptions,
+  type ExtractorFailure,
+  type ExtractorRequest,
+  type ExtractorSubject,
+} from './extractor.js';
+export {
   ANTHROPIC_KEY_VARIABLE,
   LIVE_LLM_FLAG,
   liveLlmSkipReason,

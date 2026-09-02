@@ -23,6 +23,7 @@
   },
   "devDependencies": {
     "@chief-of-staff/api": "workspace:*",
-    "@chief-of-staff/db": "workspace:*"
+    "@chief-of-staff/db": "workspace:*",
+    "@chief-of-staff/fixtures": "workspace:*"
   }
 }
