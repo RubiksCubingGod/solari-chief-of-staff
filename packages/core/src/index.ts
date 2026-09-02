@@ -117,3 +117,4 @@ export * from './task-lifecycle.js';
 export * from './user-io.js';
 export * from './watch/index.js';
 export * from './book-slot.js';
+export * from './llm-usage.js';

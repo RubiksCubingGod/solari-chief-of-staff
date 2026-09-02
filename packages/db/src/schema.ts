@@ -17,6 +17,7 @@ import {
   WATCH_HEALTH_STATES,
   WATCH_KINDS,
   WATCH_STATUSES,
+  type TaskLlmUsage,
 } from '@chief-of-staff/core';
 import {
   bigint,
@@ -173,6 +174,10 @@ export const tasks = pgTable(
     // Null until the task reaches a terminal transition, so a worker that
     // crashes mid-run leaves a resumable row rather than a half-written result.
     result: jsonb('result'),
+    // What the model has cost this task so far: every call's tokens and the
+    // price of them, kept as they are spent so a task that dies mid-run
+    // still says what it cost. Null until a model has been called.
+    llmUsage: jsonb('llm_usage').$type<TaskLlmUsage>(),
     createdAt: timestampColumn('created_at').notNull().defaultNow(),
     finishedAt: timestampColumn('finished_at'),
   },

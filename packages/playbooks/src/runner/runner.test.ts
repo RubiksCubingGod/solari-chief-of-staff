@@ -23,6 +23,7 @@ function task(overrides: Partial<Task> = {}): Task {
     recordingUrl: null,
     jobId: null,
     result: null,
+    llmUsage: null,
     createdAt: NOW,
     finishedAt: null,
     ...overrides,

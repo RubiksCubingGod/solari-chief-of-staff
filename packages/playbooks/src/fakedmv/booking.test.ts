@@ -42,6 +42,7 @@ function task(input: unknown): Task {
     recordingUrl: null,
     jobId: null,
     result: null,
+    llmUsage: null,
     createdAt: NOW,
     finishedAt: null,
   };

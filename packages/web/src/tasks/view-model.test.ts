@@ -23,6 +23,7 @@ function task(overrides: Partial<Task> & { readonly id: string }): Task {
     solariSessionId: null,
     recordingUrl: null,
     result: null,
+    llmUsage: null,
     createdAt: '2026-01-01T00:00:00.000Z',
     finishedAt: null,
     ...overrides,

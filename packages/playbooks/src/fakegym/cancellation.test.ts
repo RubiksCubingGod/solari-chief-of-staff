@@ -131,6 +131,7 @@ describe('the login step', () => {
     recordingUrl: null,
     jobId: null,
     result: null,
+    llmUsage: null,
     createdAt: new Date('2026-09-02T10:00:00Z'),
     finishedAt: null,
   };

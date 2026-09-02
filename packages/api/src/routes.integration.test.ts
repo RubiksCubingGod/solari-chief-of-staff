@@ -369,6 +369,7 @@ describe('POST /tasks', () => {
       solariSessionId: null,
       recordingUrl: null,
       result: null,
+      llmUsage: null,
       finishedAt: null,
     });
 
