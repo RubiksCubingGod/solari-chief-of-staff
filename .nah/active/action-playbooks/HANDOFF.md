@@ -1,5 +1,34 @@
 # Handoff
 
+## 2026-09-02 · hardening · round one
+
+### Where the frontier is
+
+- `nah harden s5` adopted hardening attempt `attempt-r95a4c76549e14b0dae179d45e1d574d5` for request `hardening-he358849b81584114` at 13:23Z; NAH committed its own planning delta as `7743873`.
+- Round one is audited. One medium gap; its repair is task `harden-request-context-guard` (`origin: hardening`, pending, no prerequisites). Next: `nah implement s5` runs it, then `nah stage implementation-complete`, then `nah harden s5` for round two.
+
+### Findings (round one, consumer-backward)
+
+1. **MEDIUM — `guardrails:api-request-context-unguarded`.** Surface: `installGuardrails` in `packages/playbooks/src/guardrails/guardrails.ts`. Claim (guardrail-layer spec, Invariant): neither a playbook step nor an s6 tool call can navigate around the rules because enforcement happens at navigation/request interception. Proof gap: the guard is `context.route('**/*')` plus `context.on('request')`; Playwright's `page.request` and `context.request` (`APIRequestContext`, set as own properties in playwright-core 1.62.1) send from the driver with the context's cookies and never pass a route handler, so a step can GET any host or POST a card-shaped body with no violation and no gate. No proof exercises them. Repair: shadow both with a proxy whose request methods raise an allowlist stop (`via: 'request-context'`, `reason: 'unguarded'`) through the same announce path as a blocked navigation; browser-only integration proof plus a unit pin on the wording.
+2. **LOW — worker documentation drift** (folded into the same task): the root README's `pnpm worker` row still describes only watches, and `.env.example` does not carry `FAKEGYM_URL`, which `scripts/worker.mjs` reads.
+
+### Evidence findings (non-blocking, carried as recorded)
+
+- `nah verify action-playbooks task-state-machine task-lifecycle-green --retry` under the hardening attempt was refused: `Task 'task-state-machine' has stale evidence but no active implementation session can refresh it`. Nothing was re-run or re-recorded in this stage.
+- Standing receipts: `task-lifecycle-green` failed at 08:10Z (environmental: no test database could be started); `task-lifecycle-gate` failed at 05:22Z on the watch-engine sibling's then-uncommitted tests, and the identical command passed on later trees at 06:27Z, 07:15Z, 07:36Z and 08:07Z; `userio-green` (05:32Z), `guardrails-green` (06:21Z), `runner-green` (07:31Z) and the per-task gates are stale against files changed since. Plan: once the implement attempt is live for the repair, `nah task finish` each done task to reconcile evidence in place before `implementation-complete`, Postgres permitting.
+
+### Observations (inside accepted scope; no task)
+
+- Worker composition: `scripts/worker.mjs` runs the LocalProvider with profile-only credentials, and no route creates a site connection, so the fakegym cancellation succeeds only in proofs until s9 (hosted provider, connect flow). Its failures are truthful: refused before a browser without a connection, `reconnect this site` at the login page.
+- `POST /tasks` inserts only; the reconcile sweep enqueues within a minute. The state-machine assumption that direct enqueue would land with `playbook-runner` did not happen (the API has no job harness). Left as is.
+- `tasks.solari_session_id` and `recording_url` keep the last session of a task; resume is a fresh session by design, and the trail keeps every `browser_session` step. One-column schema; s9 decides whether a task needs more.
+- "The user answers stop" is met by the typed decline (`UserReply.kind = 'decline'`); mapping a word to a decline belongs to the channel (s7).
+- Checked and satisfied against the specs: the no-bypass unit proof (`has no switch`), allowlist by click, redirect and popup, gate ask/decline/confirm/re-ask, recording echo; lifecycle transitions, illegal transition, timeout and late answer, crash retry and orphan, duplicate delivery, API-created pickup; the six replay e2e cases including cross-user 404 and the gzip-tolerant loader; the nine cancellation cases each asserting membership unchanged.
+
+### Resume
+
+`nah implement s5`
+
 ## 2026-09-02 · implementation · fakegym-cancellation
 
 **Frontier.** `fakegym-cancellation` was the last ready task; it finished at `109e0a9` (a first
@@ -385,3 +414,17 @@ two-minute tool timeout after recording its events, so its ledger delta was comm
 - Assurance request: none
 - Knowledge revisions: none
 - Resume: `nah implement s5`
+
+<!-- nah-checkpoint:8b45ae562fe03927 -->
+## 2026-09-02T13:24:50.738Z · claude-code · 8054cf2e-8aef-4bfd-8b27-56afcffb8a6f
+
+- Stage: hardening
+- Ready: none
+- In progress: none
+- Root blockers: none
+- Done: 6/6
+- Receipts: verification-completed-eventc75e501c0b9844b68b468c29ec17058f, verification-completed-event95b4de8e04a649ba9bc73a37d079a346, verification-completed-eventa20f3fd88c57419d85f34c6fe29fd100, verification-completed-event3cc439ae178d481b9d6c6c5f86365f90, verification-completed-event9711a9c6a8a24baa903d024f4fb5e8a1, verification-completed-event1cc6f970db55419ca8abf720f56b120c, verification-completed-eventa518e31cece447b8a31ca3508624eaf4, verification-completed-eventc2f3eea1a9154ec2b4035f7a0e6da3f3, verification-completed-event29a9ff284177409b887b886fcb30b45d, verification-completed-event6e7d9ec0a1e1454ab19e3c53d1c3d8bc, verification-completed-evente3356b555da844b3ac5f4b45bf5710c9, verification-completed-evente57fb0d0a41c4c77a15b68521e6a3f8e, verification-completed-event7cf1724816d74496adf34ab1a48f819f, verification-completed-eventaaaa3ad07a8f4c4aa2ccec9625b278d9, verification-completed-eventc68bfc15559148bf9992112ae606639e, verification-completed-event9891a8d6f6eb48e3b74c763f560d2655, verification-completed-eventb500cbd155b54d6696a868fe7638feeb, verification-completed-eventf3e221d2f0e741bfacedf8a3674f0e20, verification-completed-event69d176706a374cf7aab88b679a33e3d4, verification-completed-event305fdba82cc74e71967012507eed15b7, verification-completed-eventde429ae98e734f9eadf12c87802f7dc3, verification-completed-event223b8d0d7b4949d996a010e8b61482d1, verification-completed-event426d9ce3b90641f1bde8f1529f1b94de, verification-completed-event6ac21023b6a743198443333e2476f2a2, verification-completed-event0d0efaa5227e4017bd6749e082f57749, verification-completed-event34e52f8038c54c77a6daf53a76bff5f7, verification-completed-event94f50fc9752b4adab561ef4396ca8030, verification-completed-event9e03a3d8c876410298db3d1f98137c09, verification-completed-evente9aff87e6a6d4bb98aba006db4b52f2b, verification-completed-evente44deb3f2afd461cadaefbd4164be386, verification-completed-eventb209d1791553490c822e8ece7e227e30, verification-completed-event4a001b292b1941fbab551635718f8f85, verification-completed-eventb3aedca336ec4d51825c116c6d66a38c, verification-completed-event396f124cb45f47b7abd788f2cf093f24
+- Findings: none
+- Assurance request: hardening:hardening-he358849b81584114
+- Knowledge revisions: none
+- Resume: `nah harden s5`
