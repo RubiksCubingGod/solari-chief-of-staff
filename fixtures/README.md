@@ -129,23 +129,26 @@ which is what makes "the engine actually asked the user" provable. Refusals are 
 
 ```routes
 GET /
-GET /login
-POST /login
-GET /member
-GET /cancel/step-1
-POST /cancel/step-1
-GET /cancel/step-2
-POST /cancel/step-2
-GET /cancel/step-3
-POST /cancel/step-3
-GET /cancel/confirm
-POST /cancel/confirm
-GET /__test/state
-POST /__test/seed
-POST /__test/reset
-POST /__test/member
 GET /__test/member/:id
 GET /__test/member/:id/code
+GET /__test/mode
+GET /__test/state
+GET /cancel/confirm
+GET /cancel/step-1
+GET /cancel/step-2
+GET /cancel/step-3
+GET /login
+GET /member
+GET /partner/retention
+POST /__test/member
+POST /__test/mode
+POST /__test/reset
+POST /__test/seed
+POST /cancel/confirm
+POST /cancel/step-1
+POST /cancel/step-2
+POST /cancel/step-3
+POST /login
 ```
 
 ### fakedmv (port 4304)
