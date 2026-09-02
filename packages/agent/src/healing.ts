@@ -95,13 +95,28 @@ export async function extractWatchValue(
 
 async function createFirst(ports: ExtractionPorts, watch: ExtractionSubject, html: string): Promise<Extraction> {
   if (watch.health === 'needs_extractor') {
-    const earlier = watch.lastError ?? 'the last attempt to write one failed';
-    return { ok: false, health: 'needs_extractor', reason: `no extractor: ${earlier}; reset the watch to try again` };
+    return { ok: false, health: 'needs_extractor', reason: parkedReason(watch.lastError) };
   }
   const creation = await provisionExtractor(ports.creator, ports.store, watch, html);
   return creation.ok
     ? { ok: true, route: 'created', value: creation.value }
     : { ok: false, health: 'needs_extractor', reason: describeCreationFailure(creation) };
+}
+
+const PARKED_PREFIX = 'no extractor: ';
+const PARKED_SUFFIX = '; reset the watch to try again';
+
+/**
+ * The reason a parked watch reports every tick. The check writes it back to
+ * the row as `last_error`, and the next tick reads it from there, so a reason
+ * that is already in this frame is handed back as it is rather than wrapped
+ * in another one; otherwise the row would grow by a frame per tick.
+ */
+function parkedReason(lastError: string | null): string {
+  if (lastError !== null && lastError.startsWith(PARKED_PREFIX) && lastError.endsWith(PARKED_SUFFIX)) {
+    return lastError;
+  }
+  return `${PARKED_PREFIX}${lastError ?? 'the last attempt to write one failed'}${PARKED_SUFFIX}`;
 }
 
 async function heal(

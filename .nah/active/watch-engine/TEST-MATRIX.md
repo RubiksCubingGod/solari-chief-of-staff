@@ -15,6 +15,8 @@
 | Double-failure → degraded state, one notifier event, no further LLM calls | extractor-lifecycle | integration | every push |
 | Real Claude call creates a working extractor for a fixture page | extractor-lifecycle | @live-llm (needs ANTHROPIC_API_KEY) | nightly + manual |
 | Valid watch configs drive checks; invalid refuse typed 4xx; tier reset clears floor | watch-check-path | integration | every push |
+| Parked watch (creator refused) reads the same reason on the second and third tick; one creation request; no event (hardening) | extractor-lifecycle | unit (composed check over in-file fakes) | every push |
+| Two-sided price condition: swing across both bounds triggers; same side stays quiet naming the bound (hardening) | watch-check-path | unit | every push |
 
 Stealth at tier 2 is proven against the seam contract (echo asserted) on LocalProvider — real
 Solari stealth behavior is deliberately deferred to real-site-hardening (s9).

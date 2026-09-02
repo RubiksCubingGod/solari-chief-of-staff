@@ -180,6 +180,18 @@ describe('extractWatchValue', () => {
     expect(requests).toEqual([]);
   });
 
+  it('hands a parked reason back as it is once the row already carries it, instead of wrapping it again', async () => {
+    const parked =
+      'no extractor: no-proposal: the model described the page instead of choosing a selector; reset the watch to try again';
+    const watch = sampleWatch({ health: 'needs_extractor', lastError: parked });
+    const { ports, requests } = bench(watch);
+
+    const extraction = await extractWatchValue(ports, watch, NORMAL);
+
+    expect(extraction).toEqual({ ok: false, health: 'needs_extractor', reason: parked });
+    expect(requests).toEqual([]);
+  });
+
   it('heals once when the stored extractor breaks: one model call, the new spec stored, the value read', async () => {
     const watch = sampleWatch({ extractor: CLASS_SPEC, lastError: null });
     const { ports, store, requests, notifier } = bench(watch, accept(HOOK_SPEC, REDESIGN_PRICE));
