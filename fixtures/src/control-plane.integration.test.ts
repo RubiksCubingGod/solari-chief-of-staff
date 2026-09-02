@@ -35,10 +35,12 @@ describe('the control plane every fixture shares', () => {
     }
   });
 
-  it('mounts the mode route on the observation targets only', async () => {
+  it('mounts the mode route only where every mode has a specified meaning', async () => {
     // The contract cross-references `mode` to `hostile-mode-surfaces`, which
-    // defines modes for pages an engine observes. A `redesign`ed booking POST
-    // has no specified meaning, so the flow fixtures must not claim one.
+    // defines modes for pages an engine observes. Fakegym claims them too,
+    // with a meaning of its own for `redesign`: the retention step hands the
+    // flow to a partner host. A `redesign`ed booking POST has no specified
+    // meaning, so fakedmv must not claim one.
     const withMode: string[] = [];
     for (const site of FIXTURE_SITES) {
       const handle = await site.start();
@@ -50,7 +52,7 @@ describe('the control plane every fixture shares', () => {
         await handle.stop();
       }
     }
-    expect(withMode.sort()).toEqual(['fakenews', 'fakestore']);
+    expect(withMode.sort()).toEqual(['fakegym', 'fakenews', 'fakestore']);
   });
 });
 

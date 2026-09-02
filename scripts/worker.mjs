@@ -60,10 +60,15 @@ async function run() {
   // Every event is one JSON line on stdout until a delivery channel lands.
   const notifier = watch.createLogNotifier();
   // Every playbook-mode task goes through the runner, on the same provider.
-  // No playbook is registered yet - the fakegym cancellation is the first -
-  // so until one is, every task is refused in a sentence rather than run.
-  // A question for a person is one JSON line on stdout, like the events.
-  const registry = playbooks.createPlaybookRegistry([]);
+  // The fakegym cancellation is the only playbook so far; its origin is where
+  // the fixture listens on this machine. Every other task is refused in a
+  // sentence rather than run. A question for a person is one JSON line on
+  // stdout, like the events.
+  const registry = playbooks.createPlaybookRegistry([
+    playbooks.fakegymCancellation({
+      origin: process.env['FAKEGYM_URL']?.trim() || 'http://127.0.0.1:4303',
+    }),
+  ]);
   const mission = playbooks.createPlaybookMission({ db: database.db, provider, registry });
 
   let worker;

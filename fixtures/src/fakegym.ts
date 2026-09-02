@@ -12,7 +12,8 @@ import {
   startFixture,
   type StartFixtureOptions,
 } from './harness.js';
-import { documentShell, escapeHtml, NORMAL_STATE } from './pages.js';
+import { buildModeControl, createModeState, type ModeControl, type ModeSeed } from './modes.js';
+import { escapeHtml, type PageContent } from './pages.js';
 
 export type MemberStatus = 'active' | 'retained' | 'cancelled';
 
@@ -48,11 +49,11 @@ export interface FakegymState {
   readonly members: readonly Member[];
 }
 
-export interface FakegymSeed {
+export interface FakegymSeed extends ModeSeed {
   readonly members?: readonly MemberInput[];
 }
 
-export interface FakegymControl extends InstanceControl<FakegymState, FakegymSeed> {
+export interface FakegymControl extends InstanceControl<FakegymState, FakegymSeed>, ModeControl {
   seedMember(input: MemberInput): Promise<Member>;
   member(id: string): Promise<Member>;
   confirmationCode(id: string): Promise<string>;
@@ -84,11 +85,11 @@ function publicMember(member: StoredMember): Member {
   return { id: member.id, email: member.email, name: member.name, status: member.status };
 }
 
-function page(title: string, main: string[]): string {
-  return documentShell({ title, state: NORMAL_STATE, main: main.join('\n') });
+function page(title: string, main: string[]): PageContent {
+  return { title, main: main.join('\n') };
 }
 
-function stepPage(step: number, heading: string, prompt: string): string {
+function stepPage(step: number, heading: string, prompt: string): PageContent {
   return page(heading, [
     `      <section class="gym-step" data-testid="cancel-step-${step}">`,
     `        <h1>${escapeHtml(heading)}</h1>`,
@@ -107,6 +108,9 @@ export function startFakegymFixture(
   const members = new Map<string, StoredMember>();
   const sessions = new Map<string, Session>();
   let baseline: StoredMember[] = [];
+  // The hostile modes every fixture shares: the blocked shells, and a redesign
+  // that here hands retention to a partner host. Members keep their own state.
+  const modes = createModeState();
 
   const parseMember = (body: unknown): StoredMember | string => {
     const { id, email, password, name } = readRecord(body);
@@ -120,6 +124,31 @@ export function startFakegymFixture(
       return 'id, email, password and name are required';
     }
     return { id, email, password, name, status: 'active', code: generateCode() };
+  };
+
+  /** The seed's members, if it names any: every one valid, or the first complaint. */
+  const parseMembers = (raw: unknown): StoredMember[] | string | undefined => {
+    if (raw === undefined) {
+      return undefined;
+    }
+    if (!Array.isArray(raw)) {
+      return 'members must be an array';
+    }
+    const parsed: StoredMember[] = [];
+    for (const entry of raw) {
+      const member = parseMember(entry);
+      if (typeof member === 'string') {
+        return member;
+      }
+      parsed.push(member);
+    }
+    return parsed;
+  };
+
+  /** This server by the name the allowlist does not carry, for the redesign's partner redirect. */
+  const partnerOrigin = (request: Request): string => {
+    const port = request.get('host')?.split(':')[1];
+    return `http://localhost${port === undefined ? '' : `:${port}`}`;
   };
 
   const readSession = (request: Request): Session | undefined => {
@@ -163,33 +192,29 @@ export function startFakegymFixture(
 
   const mount = (app: Express): void => {
     app.use(express.urlencoded({ extended: false }));
+    modes.mount(app);
 
     mountInstanceRoutes<FakegymState>(app, {
       state: () => ({ members: [...members.values()].map(publicMember) }),
       seed: (body) => {
-        const raw = readRecord(body).members;
-        if (raw === undefined) {
-          baseline = [...members.values()].map((member) => ({ ...member }));
-          return undefined;
+        const record = readRecord(body);
+        const parsed = parseMembers(record.members);
+        if (typeof parsed === 'string') {
+          return parsed;
         }
-        if (!Array.isArray(raw)) {
-          return 'members must be an array';
+        const refusal = modes.seed(record);
+        if (refusal !== undefined) {
+          return refusal;
         }
-        const parsed: StoredMember[] = [];
-        for (const entry of raw) {
-          const member = parseMember(entry);
-          if (typeof member === 'string') {
-            return member;
+        if (parsed !== undefined) {
+          members.clear();
+          for (const member of parsed) {
+            members.set(member.id, member);
           }
-          parsed.push(member);
+          // A fresh starting state means nobody is signed in; leaving sessions
+          // behind would let a seeded instance answer as a member it no longer has.
+          sessions.clear();
         }
-        members.clear();
-        for (const member of parsed) {
-          members.set(member.id, member);
-        }
-        // A fresh starting state means nobody is signed in; leaving sessions
-        // behind would let a seeded instance answer as a member it no longer has.
-        sessions.clear();
         baseline = [...members.values()].map((member) => ({ ...member }));
         return undefined;
       },
@@ -201,11 +226,12 @@ export function startFakegymFixture(
           members.set(member.id, { ...member });
         }
         sessions.clear();
+        modes.reset();
       },
     });
 
-    app.get('/', (_request, response) => {
-      response.type('text/html').send(
+    app.get('/', (request, response) => {
+      modes.serve(request, response, () =>
         page('Fakegym', [
           '      <h1>Fakegym</h1>',
           '      <a href="/login" data-testid="go-to-login">Sign in</a>',
@@ -213,8 +239,8 @@ export function startFakegymFixture(
       );
     });
 
-    app.get('/login', (_request, response) => {
-      response.type('text/html').send(
+    app.get('/login', (request, response) => {
+      modes.serve(request, response, () =>
         page('Sign in', [
           '      <h1>Sign in</h1>',
           '      <form method="post" action="/login">',
@@ -246,7 +272,7 @@ export function startFakegymFixture(
       if (member === undefined) {
         return;
       }
-      response.type('text/html').send(
+      modes.serve(request, response, () =>
         page(`${member.name}'s membership`, [
           '      <section class="gym-member">',
           `        <h1>${escapeHtml(member.name)}</h1>`,
@@ -261,7 +287,7 @@ export function startFakegymFixture(
       if (acting(request, response, 'redirect') === undefined) {
         return;
       }
-      response.type('text/html').send(
+      modes.serve(request, response, () =>
         page('Before you go', [
           '      <section class="gym-step" data-testid="cancel-step-1">',
           '        <h1>Before you go</h1>',
@@ -279,6 +305,13 @@ export function startFakegymFixture(
       const member = acting(request, response, 'refuse');
       const session = readSession(request);
       if (member === undefined || session === undefined) {
+        return;
+      }
+      if (modes.current() === 'redesign') {
+        // The redesigned site hands retention to a partner on another host
+        // before it has advanced anything: an engine that follows leaves its
+        // allowlist, and one that refuses to leaves the membership as it was.
+        response.redirect(302, `${partnerOrigin(request)}/partner/retention`);
         return;
       }
       if (readRecord(request.body).choice === 'keep') {
@@ -304,13 +337,11 @@ export function startFakegymFixture(
           refuse(response, 409, 'step-skipped');
           return;
         }
-        response
-          .type('text/html')
-          .send(
-            step === 2
-              ? stepPage(2, 'Are you sure?', 'Your access ends at the close of the billing period.')
-              : stepPage(3, 'Really sure?', 'This cannot be undone from the app.'),
-          );
+        modes.serve(request, response, () =>
+          step === 2
+            ? stepPage(2, 'Are you sure?', 'Your access ends at the close of the billing period.')
+            : stepPage(3, 'Really sure?', 'This cannot be undone from the app.'),
+        );
       });
 
       app.post(`/cancel/step-${step}`, (request, response) => {
@@ -341,7 +372,7 @@ export function startFakegymFixture(
         refuse(response, 409, 'step-skipped');
         return;
       }
-      response.type('text/html').send(
+      modes.serve(request, response, () =>
         page('Enter your confirmation code', [
           '      <section class="gym-step" data-testid="cancel-confirm">',
           '        <h1>Enter your confirmation code</h1>',
@@ -375,6 +406,19 @@ export function startFakegymFixture(
       }
       member.status = 'cancelled';
       response.json({ status: member.status });
+    });
+
+    // The "partner" the redesign hands retention to: this same server by a
+    // name the task's allowlist does not carry, which is what makes following
+    // it a violation rather than a page.
+    app.get('/partner/retention', (request, response) => {
+      modes.serve(request, response, () =>
+        page('Partner retention', [
+          '      <section class="gym-partner" data-testid="partner-retention">',
+          '        <h1>Our partner would like a word</h1>',
+          '      </section>',
+        ]),
+      );
     });
 
     app.post('/__test/member', (request, response) => {
@@ -411,6 +455,7 @@ export function startFakegymFixture(
 
   const buildControl = (request: ControlRequest): FakegymControl => ({
     ...buildInstanceControl<FakegymState, FakegymSeed>(request),
+    ...buildModeControl(request),
     seedMember: (input) => request<Member>('POST', '/__test/member', input),
     member: (id) => request<Member>('GET', `/__test/member/${id}`),
     confirmationCode: async (id) =>

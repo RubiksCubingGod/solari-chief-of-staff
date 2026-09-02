@@ -42,13 +42,14 @@ Isolation still comes from the boot model, not from `reset` — two instances ne
 never needed resetting to be independent. `reset` is for a test that wants several rounds against
 one instance without paying for another boot.
 
-`POST /__test/mode` is mounted by the observation targets only. Modes are defined by
-`hostile-mode-surfaces` for pages an engine *observes*; there is no specified meaning for a
-`redesign`ed booking POST, so the flow fixtures do not pretend to have one.
+`POST /__test/mode` is mounted where every mode has a specified meaning: the observation targets,
+and `fakegym`, whose cancellation flow gives `redesign` a meaning of its own (below). Modes are
+defined by `hostile-mode-surfaces` for pages an engine *observes*; there is no specified meaning for
+a `redesign`ed booking POST, so `fakedmv` does not pretend to have one.
 
 ## Hostile modes
 
-Any observation target (`fakestore`, `fakenews`) can be put into a mode through
+Any observation target (`fakestore`, `fakenews`), and `fakegym`, can be put into a mode through
 `POST /__test/mode`, taking effect on the next request to the same URL. `?mode=` on a single
 request overrides for that request only, for manual pokes; it never writes the stored mode. An
 unknown mode is refused with a 400 and the instance keeps the mode it had.
@@ -62,6 +63,13 @@ unknown mode is refused with a 400 and the instance keeps the mode it had.
 
 A mode never changes the URL, and `redesign` never changes the semantic surface: accessible names,
 ARIA roles, heading structure, visible text, and `data-testid` hooks stay byte-identical.
+
+On `fakegym` the modes wrap every page the flow shows (`blocked` and `hard-blocked` serve the shells
+above; the form POSTs still answer JSON), and `redesign` changes what happens rather than how it
+looks: declining the retention offer is answered with a 302 to
+`http://localhost:<port>/partner/retention`, the same server by a host a task's allowlist does not
+carry, before the session's progress has moved. That is what lets action-playbooks prove an engine
+stops at the edge of its lane and leaves the membership untouched.
 
 ### The escalation header
 
