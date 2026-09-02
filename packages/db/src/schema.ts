@@ -11,10 +11,12 @@ import {
   TASK_MODES,
   TASK_STATUSES,
   TIER_POLICIES,
+  WATCH_HEALTH_STATES,
   WATCH_KINDS,
   WATCH_STATUSES,
 } from '@chief-of-staff/core';
 import {
+  bigint,
   boolean,
   date,
   index,
@@ -36,6 +38,7 @@ import {
 
 export const watchKind = pgEnum('watch_kind', WATCH_KINDS);
 export const watchStatus = pgEnum('watch_status', WATCH_STATUSES);
+export const watchHealth = pgEnum('watch_health', WATCH_HEALTH_STATES);
 export const tierPolicy = pgEnum('tier_policy', TIER_POLICIES);
 export const fetchTier = pgEnum('fetch_tier', FETCH_TIERS);
 export const siteConnectionStatus = pgEnum('site_connection_status', SITE_CONNECTION_STATUSES);
@@ -101,8 +104,21 @@ export const watches = pgTable(
     schedule: text('schedule').notNull(),
     tierPolicy: tierPolicy('tier_policy').notNull().default('auto'),
     status: watchStatus('status').notNull().default('active'),
+    /**
+     * What the engine found, as distinct from what the person asked for
+     * (`status`). Only a check or a reset writes it.
+     */
+    health: watchHealth('health').notNull().default('healthy'),
+    /**
+     * The lowest tier the ladder should start from next time. A watch that
+     * was blocked at plain HTTP and served by a browser starts at the browser
+     * on every later check, instead of paying for the refusal again first.
+     */
+    tierFloor: fetchTier('tier_floor').notNull().default('http'),
     lastValue: jsonb('last_value'),
     lastCheckedAt: timestampColumn('last_checked_at'),
+    /** Why the most recent check failed, or null when it did not. */
+    lastError: text('last_error'),
     consecutiveFailures: integer('consecutive_failures').notNull().default(0),
   },
   (table) => [index('watches_user_id_idx').on(table.userId)],
@@ -139,6 +155,12 @@ export const tasks = pgTable(
     playbookId: text('playbook_id'),
     solariSessionId: text('solari_session_id'),
     recordingUrl: text('recording_url'),
+    // The pg-boss job entitled to run this task, written when the run is
+    // enqueued. A delivery carrying any other job id is a stale duplicate and
+    // steps aside, which is what makes a double enqueue harmless. Null means
+    // no run has been enqueued yet - how the reconcile sweep finds a task the
+    // API created and nobody picked up.
+    jobId: text('job_id'),
     // Null until the task reaches a terminal transition, so a worker that
     // crashes mid-run leaves a resumable row rather than a half-written result.
     result: jsonb('result'),
@@ -155,6 +177,11 @@ export const taskEvents = pgTable(
     taskId: uuid('task_id')
       .notNull()
       .references(() => tasks.id, { onDelete: 'cascade' }),
+    // The timeline's order. `ts` is the writer's clock and ties inside one
+    // transaction - an ask writes two rows - while this is handed out by
+    // Postgres and never ties, so two events can always be put in the order
+    // they were written.
+    seq: bigint('seq', { mode: 'number' }).notNull().generatedAlwaysAsIdentity(),
     ts: timestampColumn('ts').notNull().defaultNow(),
     type: taskEventType('type').notNull(),
     payload: jsonb('payload').notNull(),

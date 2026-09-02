@@ -36,6 +36,13 @@
       "when": 1788287683250,
       "tag": "0004_login_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788324672620,
+      "tag": "0005_watch_engine_state",
+      "breakpoints": true
     }
   ]
 }

@@ -15,5 +15,8 @@
   ],
   "scripts": {
     "build": "tsc --build"
+  },
+  "dependencies": {
+    "cheerio": "1.2.0"
   }
 }

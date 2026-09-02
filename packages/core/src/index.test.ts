@@ -13,6 +13,7 @@ import {
   TASK_MODES,
   TASK_STATUSES,
   TIER_POLICIES,
+  WATCH_HEALTH_STATES,
   WATCH_KINDS,
   WATCH_STATUSES,
   isCalendarItemKind,
@@ -27,6 +28,7 @@ import {
   isTaskMode,
   isTaskStatus,
   isTierPolicy,
+  isWatchHealth,
   isWatchKind,
   isWatchStatus,
   memberGuard,
@@ -59,6 +61,7 @@ describe('domain vocabulary', () => {
     { name: 'TASK_EVENT_TYPES', values: TASK_EVENT_TYPES, guard: isTaskEventType },
     { name: 'CALENDAR_ITEM_KINDS', values: CALENDAR_ITEM_KINDS, guard: isCalendarItemKind },
     { name: 'WATCH_STATUSES', values: WATCH_STATUSES, guard: isWatchStatus },
+    { name: 'WATCH_HEALTH_STATES', values: WATCH_HEALTH_STATES, guard: isWatchHealth },
     { name: 'FETCH_TIERS', values: FETCH_TIERS, guard: isFetchTier },
     { name: 'TIER_POLICIES', values: TIER_POLICIES, guard: isTierPolicy },
     {

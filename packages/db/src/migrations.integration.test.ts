@@ -79,6 +79,11 @@ describe('the generated migration set', () => {
     expect(user.tz).toBe('UTC');
     expect(watch.tierPolicy).toBe('auto');
     expect(watch.status).toBe('active');
+    // The engine's own columns start where a watch nobody has checked yet is:
+    // healthy, at the bottom of the tier ladder, with nothing to report.
+    expect(watch.health).toBe('healthy');
+    expect(watch.tierFloor).toBe('http');
+    expect(watch.lastError).toBeNull();
     expect(watch.consecutiveFailures).toBe(0);
     expect(watch.lastCheckedAt).toBeNull();
   });

@@ -12,20 +12,29 @@ export type WatchKind = (typeof WATCH_KINDS)[number];
 export const TASK_KINDS = ['cancel', 'book_slot', 'custom'] as const;
 export type TaskKind = (typeof TASK_KINDS)[number];
 
-/** The persisted state machine from ARCHITECTURE §3.2. */
+/**
+ * The persisted state machine from ARCHITECTURE §3.2. `cancelled` is the end a
+ * task reaches when the person it asked says no; the moves between these live
+ * in `task-lifecycle.ts`.
+ */
 export const TASK_STATUSES = [
   'queued',
   'running',
   'waiting_user',
   'succeeded',
   'failed',
+  'cancelled',
 ] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
 export const TASK_MODES = ['playbook', 'agentic'] as const;
 export type TaskMode = (typeof TASK_MODES)[number];
 
-export const TASK_EVENT_TYPES = ['step', 'ask_user', 'user_reply', 'transition'] as const;
+/**
+ * What a `task_events` row records. `rejected` is a move the machine refused:
+ * it changes nothing on the task and exists so the attempt is on the record.
+ */
+export const TASK_EVENT_TYPES = ['step', 'ask_user', 'user_reply', 'transition', 'rejected'] as const;
 export type TaskEventType = (typeof TASK_EVENT_TYPES)[number];
 
 export const CALENDAR_ITEM_KINDS = ['subscription', 'deadline'] as const;
@@ -33,6 +42,17 @@ export type CalendarItemKind = (typeof CALENDAR_ITEM_KINDS)[number];
 
 export const WATCH_STATUSES = ['active', 'paused'] as const;
 export type WatchStatus = (typeof WATCH_STATUSES)[number];
+
+/**
+ * How the engine is doing at a watch, as distinct from whether the person
+ * wants it running (`WatchStatus`). `healthy` is the ordinary case;
+ * `needs_extractor` is a watch the model could not write an extractor for;
+ * `blocked` is one every fetch tier was refused at; `degraded` is one whose
+ * extractor stopped matching and could not be healed. Each of the last three
+ * is what a check found, and only the engine or a reset moves a watch out.
+ */
+export const WATCH_HEALTH_STATES = ['healthy', 'needs_extractor', 'blocked', 'degraded'] as const;
+export type WatchHealth = (typeof WATCH_HEALTH_STATES)[number];
 
 /** The fetch tier ladder from ARCHITECTURE §3.1, cheapest tier first. */
 export const FETCH_TIERS = ['http', 'browser', 'stealth'] as const;
@@ -83,6 +103,7 @@ export const isTaskMode = memberGuard(TASK_MODES);
 export const isTaskEventType = memberGuard(TASK_EVENT_TYPES);
 export const isCalendarItemKind = memberGuard(CALENDAR_ITEM_KINDS);
 export const isWatchStatus = memberGuard(WATCH_STATUSES);
+export const isWatchHealth = memberGuard(WATCH_HEALTH_STATES);
 export const isFetchTier = memberGuard(FETCH_TIERS);
 export const isTierPolicy = memberGuard(TIER_POLICIES);
 export const isSiteConnectionStatus = memberGuard(SITE_CONNECTION_STATUSES);
@@ -97,3 +118,6 @@ export {
   isBindingCode,
   normalizeBindingCode,
 } from './binding-code.js';
+
+export * from './task-lifecycle.js';
+export * from './watch/index.js';
