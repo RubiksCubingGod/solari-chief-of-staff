@@ -20,7 +20,10 @@ export interface Comparison {
   readonly reason: string;
 }
 
-/** Which of the condition's bounds a price is past. At most one can be. */
+/**
+ * Which of the condition's bounds a price is past. Both at once only when the
+ * parser let a floor sit above its ceiling; the floor's words win then.
+ */
 interface Sides {
   readonly below: boolean;
   readonly above: boolean;
