@@ -48,7 +48,7 @@ function proposal(selector: string, extra: Record<string, unknown> = {}) {
 
 describe('createExtractorCreator', () => {
   it('names the ways creation can fail', () => {
-    expect(EXTRACTOR_FAILURES).toEqual(['unsupported-kind', 'unavailable', 'no-proposal', 'invalid-spec', 'replay-failed']);
+    expect(EXTRACTOR_FAILURES).toEqual(['unavailable', 'no-proposal', 'invalid-spec', 'replay-failed']);
   });
 
   it('asks for one forced proposal over a cleaned snapshot, and validates it by replay before returning it', async () => {
@@ -102,19 +102,6 @@ describe('createExtractorCreator', () => {
     expect(creation).toMatchObject({ ok: true, spec: { attribute: 'data-testid' }, value: { excerpt: 'product-title' } });
     expect(llm.requests()[0]?.body['model']).toBe('claude-sonnet-5');
     expect(llm.requests()[0]?.body['max_tokens']).toBe(300);
-  });
-
-  it('refuses a kind that has no parser without spending a call', async () => {
-    const llm = createScriptedLlm();
-
-    const creation = await createExtractorCreator({ client: llm.client }).create({ url: URL, kind: 'slot', html: PAGE });
-
-    expect(creation).toEqual({
-      ok: false,
-      failure: 'unsupported-kind',
-      reason: 'no extractor parser exists for slot watches',
-    });
-    expect(llm.requests()).toHaveLength(0);
   });
 
   it('reports an outage as unavailable, with the API\'s words', async () => {

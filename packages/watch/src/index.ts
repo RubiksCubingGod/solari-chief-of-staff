@@ -38,4 +38,13 @@ export {
   type WatchSchedulerOptions,
 } from './scheduler.js';
 export { createLogNotifier, type LogSink } from './notifier.js';
+export {
+  createDrizzleSlotTrigger,
+  rearmWatch,
+  type RearmOptions,
+  type SlotTriggerPort,
+  type SlotTriggerRequest,
+  type SlotTriggerResult,
+  type TaskRunEnqueuer,
+} from './slot-trigger.js';
 export { createDrizzleWatchStore } from './store.js';

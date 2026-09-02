@@ -97,6 +97,8 @@ function renderCalendar(slots: MutableSlot[]): string {
     state: NORMAL_STATE,
     main: [
       '      <h1 class="dmv-title">Appointments</h1>',
+      '      <p class="dmv-intro">Choose an open appointment below and enter the applicant\'s name to book it. ' +
+        'Appointments are released as they become available; check back if none is listed.</p>',
       '      <ul class="dmv-slots">',
       ...items,
       '      </ul>',

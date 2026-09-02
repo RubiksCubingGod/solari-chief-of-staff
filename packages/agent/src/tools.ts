@@ -134,7 +134,8 @@ export function createChatToolkit(options: ChatToolkitOptions): ChatToolkit {
           .describe(
             "what makes it worth notifying, in the page's own units: { \"drops_below\": 20 } for a " +
               "price watch on a $20 threshold (rises_above also works), { \"region\": \"the headline\" } " +
-              'or {} for a change watch',
+              'or {} for a change watch, { "site": "fakedmv", "applicant": { "name": "Ada Lovelace" }, ' +
+              '"auto_book": false } for a slot watch (auto_book true books without asking first)',
           ),
         extractor: z
           .record(z.string(), z.unknown())

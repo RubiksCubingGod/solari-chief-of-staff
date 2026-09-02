@@ -1,6 +1,7 @@
 import { CronExpressionParser, type CronExpression } from 'cron-parser';
 
 import { isTierPolicy, type WatchKind } from '../index.js';
+import { parseApplicant } from './condition.js';
 import { parseExtractorSpec, parserForKind } from './extractor.js';
 
 /**
@@ -127,18 +128,9 @@ export interface WatchConfigInput {
   readonly tierPolicy?: string | undefined;
 }
 
-/**
- * Every way this configuration is not one the engine can check, or an empty
- * list. A kind the engine has no parser for is reported on its own: there is
- * no sense in which its condition or extractor could be right.
- */
+/** Every way this configuration is not one the engine can check, or an empty list. */
 export function watchConfigViolations(input: WatchConfigInput, now: Date = new Date()): ConfigViolation[] {
   const violations: ConfigViolation[] = [];
-
-  const parser = parserForKind(input.kind);
-  if (parser === undefined) {
-    violations.push({ path: '/kind', message: `${input.kind} watches are not checked by this engine yet` });
-  }
 
   const urlProblem = checkWatchUrl(input.url);
   if (urlProblem !== undefined) violations.push({ path: '/url', message: urlProblem });
@@ -146,10 +138,8 @@ export function watchConfigViolations(input: WatchConfigInput, now: Date = new D
   const schedule = checkSchedule(input.schedule, now);
   if (!schedule.ok) violations.push({ path: '/schedule', message: schedule.reason });
 
-  if (parser !== undefined) {
-    violations.push(...conditionViolations(input.kind, input.condition));
-    violations.push(...extractorViolations(input.kind, parser, input.extractor));
-  }
+  violations.push(...conditionViolations(input.kind, input.condition));
+  violations.push(...extractorViolations(input.kind, parserForKind(input.kind), input.extractor));
 
   if (input.tierPolicy !== undefined && !isTierPolicy(input.tierPolicy)) {
     violations.push({ path: '/tierPolicy', message: 'is not a tier policy' });
@@ -160,16 +150,46 @@ export function watchConfigViolations(input: WatchConfigInput, now: Date = new D
 
 const PRICE_KEYS: ReadonlySet<string> = new Set(['drops_below', 'rises_above']);
 const CHANGE_KEYS: ReadonlySet<string> = new Set(['region']);
+const SLOT_KEYS: ReadonlySet<string> = new Set(['site', 'applicant', 'auto_book']);
+
+/** A site name is a registry key, not a sentence. */
+export const MAX_SITE_CHARS = 100;
+
+const KNOWN_KEYS: Readonly<Record<WatchKind, ReadonlySet<string>>> = {
+  price: PRICE_KEYS,
+  change: CHANGE_KEYS,
+  slot: SLOT_KEYS,
+};
+
+function slotViolations(record: Record<string, unknown>): ConfigViolation[] {
+  const violations: ConfigViolation[] = [];
+  const site = record['site'];
+  if (typeof site !== 'string' || site.trim() === '') {
+    violations.push({ path: '/condition/site', message: 'has to name the site to book on' });
+  } else if (site.length > MAX_SITE_CHARS) {
+    violations.push({ path: '/condition/site', message: `has to be at most ${String(MAX_SITE_CHARS)} characters` });
+  }
+  if (parseApplicant(record['applicant']) === undefined) {
+    violations.push({ path: '/condition/applicant', message: 'has to give the applicant a name' });
+  }
+  const autoBook = record['auto_book'];
+  if (autoBook !== undefined && typeof autoBook !== 'boolean') {
+    violations.push({ path: '/condition/auto_book', message: 'has to be true or false' });
+  }
+  return violations;
+}
 
 function conditionViolations(kind: WatchKind, condition: unknown): ConfigViolation[] {
   if (typeof condition !== 'object' || condition === null || Array.isArray(condition)) {
     return [{ path: '/condition', message: 'has to be an object' }];
   }
   const record = condition as Record<string, unknown>;
-  const known = kind === 'price' ? PRICE_KEYS : CHANGE_KEYS;
+  const known = KNOWN_KEYS[kind];
   const violations: ConfigViolation[] = Object.keys(record)
     .filter((key) => !known.has(key))
     .map((key) => ({ path: `/condition/${key}`, message: `is not a setting a ${kind} watch has` }));
+
+  if (kind === 'slot') return [...violations, ...slotViolations(record)];
 
   if (kind === 'price') {
     const dropsBelow = record['drops_below'] ?? null;

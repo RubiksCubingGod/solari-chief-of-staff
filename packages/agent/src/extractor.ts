@@ -73,7 +73,7 @@ const PROPOSAL_TOOL: Anthropic.Tool = {
   },
 };
 
-export const EXTRACTOR_FAILURES = ['unsupported-kind', 'unavailable', 'no-proposal', 'invalid-spec', 'replay-failed'] as const;
+export const EXTRACTOR_FAILURES = ['unavailable', 'no-proposal', 'invalid-spec', 'replay-failed'] as const;
 export type ExtractorFailure = (typeof EXTRACTOR_FAILURES)[number];
 
 export interface ExtractorRequest {
@@ -114,14 +114,6 @@ export function createExtractorCreator(options: ExtractorCreatorOptions): Extrac
   return {
     async create(request) {
       const parse = parserForKind(request.kind);
-      if (parse === undefined) {
-        return {
-          ok: false,
-          failure: 'unsupported-kind',
-          reason: `no extractor parser exists for ${request.kind} watches`,
-        };
-      }
-
       const snapshot =
         options.snapshotChars === undefined
           ? pageSnapshot(request.html)
@@ -226,6 +218,12 @@ export async function provisionExtractor(
 function describeTarget(kind: WatchKind, hint: string | null): string {
   if (kind === 'price') {
     return "the product's current price - the one a buyer would pay now, not a struck-through or previous price";
+  }
+  if (kind === 'slot') {
+    return (
+      'every appointment slot that can be booked right now, one element per slot, whose text is when the slot is ' +
+      '(its date and time) - leaving out slots shown as taken, and matching nothing at all when none is open'
+    );
   }
   if (hint !== null && hint.trim() !== '') {
     return `the region to watch for changes. The user described it as: ${hint.trim()}`;

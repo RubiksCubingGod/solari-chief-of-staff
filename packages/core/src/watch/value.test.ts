@@ -6,6 +6,7 @@ import {
   EXCERPT_LENGTH,
   WATCH_VALUE_KINDS,
   digestText,
+  isSlotListing,
   isWatchValue,
   normalizeText,
   parsePrice,
@@ -70,20 +71,29 @@ describe('normalizeText and digestText', () => {
 });
 
 describe('isWatchValue', () => {
-  it('lists the two kinds', () => {
-    expect(WATCH_VALUE_KINDS).toEqual(['price', 'digest']);
+  it('lists the three kinds', () => {
+    expect(WATCH_VALUE_KINDS).toEqual(['price', 'digest', 'slots']);
   });
 
-  it('accepts both shapes, with or without a currency', () => {
+  it('accepts every shape, with or without a currency, with or without a slot', () => {
     expect(isWatchValue({ kind: 'price', amount: 1, currency: 'USD', raw: '$1' })).toBe(true);
     expect(isWatchValue({ kind: 'price', amount: 1, currency: null, raw: '1' })).toBe(true);
     expect(isWatchValue({ kind: 'digest', digest: 'abc', excerpt: '' })).toBe(true);
+    expect(isWatchValue({ kind: 'slots', slots: [] })).toBe(true);
+    expect(isWatchValue({ kind: 'slots', slots: [{ id: 'tue-0900', label: 'Tue 8 Sep, 09:00' }] })).toBe(true);
+    expect(isSlotListing({ id: 'tue-0900', label: 'Tue 8 Sep, 09:00' })).toBe(true);
   });
 
   it('rejects everything else', () => {
     expect(isWatchValue(null)).toBe(false);
     expect(isWatchValue('price')).toBe(false);
     expect(isWatchValue({ kind: 'slot' })).toBe(false);
+    expect(isWatchValue({ kind: 'slots' })).toBe(false);
+    expect(isWatchValue({ kind: 'slots', slots: {} })).toBe(false);
+    expect(isWatchValue({ kind: 'slots', slots: [{ id: 'tue-0900' }] })).toBe(false);
+    expect(isWatchValue({ kind: 'slots', slots: [{ id: 1, label: 'Tue' }] })).toBe(false);
+    expect(isWatchValue({ kind: 'slots', slots: [null] })).toBe(false);
+    expect(isSlotListing('tue-0900')).toBe(false);
     expect(isWatchValue({ kind: 'price', amount: '1', currency: null, raw: '1' })).toBe(false);
     expect(isWatchValue({ kind: 'price', amount: Number.NaN, currency: null, raw: '' })).toBe(false);
     expect(isWatchValue({ kind: 'price', amount: 1, currency: 3, raw: '1' })).toBe(false);
@@ -117,6 +127,23 @@ describe('sameValue', () => {
       ),
     ).toBe(true);
     expect(valueIdentity({ kind: 'digest', digest: 'd', excerpt: 'one' })).toEqual({ kind: 'digest', digest: 'd' });
+  });
+
+  it('compares slot listings by their ids in order, not by the labels shown to people', () => {
+    expect(
+      sameValue(
+        { kind: 'slots', slots: [{ id: 'a', label: 'Tue 09:00' }] },
+        { kind: 'slots', slots: [{ id: 'a', label: 'Tuesday at nine' }] },
+      ),
+    ).toBe(true);
+    expect(
+      sameValue(
+        { kind: 'slots', slots: [{ id: 'a', label: 'Tue' }, { id: 'b', label: 'Thu' }] },
+        { kind: 'slots', slots: [{ id: 'b', label: 'Thu' }, { id: 'a', label: 'Tue' }] },
+      ),
+    ).toBe(false);
+    expect(sameValue({ kind: 'slots', slots: [] }, { kind: 'slots', slots: [{ id: 'a', label: 'Tue' }] })).toBe(false);
+    expect(valueIdentity({ kind: 'slots', slots: [{ id: 'a', label: 'Tue' }] })).toEqual({ kind: 'slots', ids: ['a'] });
   });
 
   it('never equates a price with a digest', () => {

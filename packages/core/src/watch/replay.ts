@@ -1,7 +1,7 @@
 import { load } from 'cheerio';
 
 import type { ExtractorSpec } from './extractor.js';
-import { digestText, parsePrice, type WatchValue } from './value.js';
+import { digestText, parsePrice, type SlotListing, type WatchValue } from './value.js';
 
 /**
  * The deterministic half of the extractor lifecycle (specs/extractor-lifecycle.md).
@@ -23,7 +23,7 @@ export type ReplayResult =
   | {
       readonly ok: true;
       readonly value: WatchValue;
-      /** How many elements the selector matched; a price reads the first. */
+      /** How many elements the selector matched; a price reads the first, a slot list reads each. */
       readonly matched: number;
       /** The text the value was read from, whitespace collapsed. */
       readonly text: string;
@@ -46,8 +46,14 @@ export function replayExtractor(spec: ExtractorSpec, html: string): ReplayResult
     };
   }
   if (matches.length === 0) {
+    // A calendar with nothing open matches nothing, and that is its answer,
+    // not a broken selector: healing on every quiet check would burn the
+    // budget the day the slot appears.
+    if (spec.parse === 'slots') return { ok: true, value: { kind: 'slots', slots: [] }, matched: 0, text: '' };
     return { ok: false, failure: 'no-match', reason: `nothing on the page matches ${spec.selector}` };
   }
+
+  if (spec.parse === 'slots') return replaySlots(spec, $, matches);
 
   // A price is one number; a list of prices is not a price, so the first
   // match is the value. A digest is of a region, which may be several
@@ -73,6 +79,35 @@ export function replayExtractor(spec: ExtractorSpec, html: string): ReplayResult
     return { ok: true, value, matched: matches.length, text };
   }
   return { ok: true, value: digestText(text), matched: matches.length, text };
+}
+
+/**
+ * Every match is one slot: its label is the match's text, and its id is the
+ * attribute the spec names when it names one, else the label. Matches with
+ * no text are not listings; a page whose matches all lack text is `empty`,
+ * the same failure a price with no text is.
+ */
+function replaySlots(
+  spec: ExtractorSpec,
+  $: ReturnType<typeof load>,
+  matches: ReturnType<ReturnType<typeof load>>,
+): ReplayResult {
+  const slots: SlotListing[] = [];
+  for (const element of matches.toArray()) {
+    const label = $(element).text().replace(/\s+/gu, ' ').trim();
+    if (label === '') continue;
+    const id = spec.attribute === null ? label : ($(element).attr(spec.attribute) ?? '').trim();
+    slots.push({ id: id === '' ? label : id, label });
+  }
+  if (slots.length === 0) {
+    return { ok: false, failure: 'empty', reason: `${spec.selector} matched, but no match has text` };
+  }
+  return {
+    ok: true,
+    value: { kind: 'slots', slots },
+    matched: matches.length,
+    text: slots.map((slot) => slot.label).join(' '),
+  };
 }
 
 export function describeReplayFailure(result: ReplayResult & { readonly ok: false }): string {

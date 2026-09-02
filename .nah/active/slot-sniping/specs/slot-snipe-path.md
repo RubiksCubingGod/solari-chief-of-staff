@@ -56,3 +56,21 @@ with booking-record, confirmation-reference, pause/re-arm, and notification asse
 slot-yank race → refused-slot-gone and re-arm; enqueue idempotence under check re-run;
 decline; blocked-mode failure leaving the watch paused; auto_book skipping the ask. Unit
 tests for the trigger policy's atomic observation+enqueue+pause behavior.
+
+## Production Path
+
+The reflex runs in the worker process (`scripts/worker.mjs`), which is the only place the
+three engines meet. The API's door accepts a `slot` watch (`packages/api/src/routes/watches.ts`
+through `watchConfigViolations`), whose condition names the site, the applicant, and
+`auto_book`. The watch engine's check (`packages/watch/src/check.ts`) extracts a `slots` value
+with the stored extractor, compares it against the last observation, and on a slot that was not
+listed last time hands the observation, the row patch and the slot to the trigger port
+(`packages/watch/src/slot-trigger.ts`), which pauses the watch, writes the observation and the
+`book_slot` task in one Postgres transaction and enqueues the run on the task queue. The task
+engine (`packages/db/src/task-engine.ts`) runs the registered fakedmv booking playbook
+(`packages/playbooks/src/fakedmv/booking.ts`) under the s5 guardrails; the snipe consequences
+(`packages/watch/src/snipe.ts`) wrap that mission so a booking leaves the watch paused, a
+refused slot-gone or a decline re-arms it, a non-slot failure leaves it paused for attention, and
+each outcome reaches the person through the s2 notifier port, which s7 implements over the bot's
+`sendToUser`. The worker registers the booking playbook against `FAKEDMV_URL` beside the
+fakegym one.

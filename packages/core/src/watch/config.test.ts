@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { parseCondition } from './condition.js';
 import {
   MAX_REGION_CHARS,
+  MAX_SITE_CHARS,
   SCHEDULE_FLOOR_MS,
   SCHEDULE_HORIZON_MS,
   checkSchedule,
@@ -106,6 +107,17 @@ const CHANGE_WATCH: WatchConfigInput = {
 
 const DIGEST_SPEC = { version: 1, strategy: 'css', selector: 'h1', attribute: null, parse: 'digest' };
 
+const SLOT_CONDITION = { site: 'fakedmv', applicant: { name: 'Ada Lovelace' } };
+
+const SLOT_WATCH: WatchConfigInput = {
+  kind: 'slot',
+  url: 'https://dmv.test/appointments',
+  schedule: '*/15 * * * *',
+  condition: SLOT_CONDITION,
+};
+
+const SLOTS_SPEC = { version: 1, strategy: 'css', selector: '.dmv-slot .dmv-when', attribute: null, parse: 'slots' };
+
 function paths(input: WatchConfigInput): string[] {
   return watchConfigViolations(input, NOW)
     .map((violation) => violation.path)
@@ -141,9 +153,31 @@ describe('watchConfigViolations', () => {
     }
   });
 
-  it('refuses a kind the engine has no parser for, without judging the rest', () => {
-    expect(watchConfigViolations({ ...PRICE_WATCH, kind: 'slot', condition: { anything: true } }, NOW)).toEqual([
-      { path: '/kind', message: 'slot watches are not checked by this engine yet' },
+  it('accepts a slot watch the trigger can act on, and refuses one it cannot, by field', () => {
+    expect(watchConfigViolations(SLOT_WATCH, NOW)).toEqual([]);
+    expect(watchConfigViolations({ ...SLOT_WATCH, condition: { ...SLOT_CONDITION, auto_book: true } }, NOW)).toEqual([]);
+    expect(watchConfigViolations({ ...SLOT_WATCH, extractor: SLOTS_SPEC }, NOW)).toEqual([]);
+    expect(parseCondition('slot', SLOT_CONDITION)).toBeDefined();
+
+    expect(watchConfigViolations({ ...SLOT_WATCH, condition: { anything: true } }, NOW)).toEqual([
+      { path: '/condition/anything', message: 'is not a setting a slot watch has' },
+      { path: '/condition/site', message: 'has to name the site to book on' },
+      { path: '/condition/applicant', message: 'has to give the applicant a name' },
+    ]);
+    expect(watchConfigViolations({ ...SLOT_WATCH, condition: { ...SLOT_CONDITION, site: ' ' } }, NOW)).toEqual([
+      { path: '/condition/site', message: 'has to name the site to book on' },
+    ]);
+    expect(
+      watchConfigViolations({ ...SLOT_WATCH, condition: { ...SLOT_CONDITION, site: 'x'.repeat(MAX_SITE_CHARS + 1) } }, NOW),
+    ).toEqual([{ path: '/condition/site', message: `has to be at most ${String(MAX_SITE_CHARS)} characters` }]);
+    expect(watchConfigViolations({ ...SLOT_WATCH, condition: { ...SLOT_CONDITION, applicant: { name: '' } } }, NOW)).toEqual([
+      { path: '/condition/applicant', message: 'has to give the applicant a name' },
+    ]);
+    expect(watchConfigViolations({ ...SLOT_WATCH, condition: { ...SLOT_CONDITION, auto_book: 'yes' } }, NOW)).toEqual([
+      { path: '/condition/auto_book', message: 'has to be true or false' },
+    ]);
+    expect(watchConfigViolations({ ...SLOT_WATCH, extractor: DIGEST_SPEC }, NOW)).toEqual([
+      { path: '/extractor/parse', message: 'a slot watch reads with a slots extractor' },
     ]);
   });
 

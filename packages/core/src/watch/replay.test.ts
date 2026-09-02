@@ -182,6 +182,66 @@ describe('replayExtractor', () => {
     if (!result.ok) expect(result.reason).toContain('dd[data-testid=');
   });
 
+  it('lists every matched element as a slot, keyed by its attribute when the spec names one', () => {
+    const page =
+      '<ul><li class="slot" data-id="tue-0900"><span class="when">Tue 8 Sep,\n  09:00</span></li>' +
+      '<li class="slot" data-id="thu-1400"><span class="when">Thu 10 Sep, 14:00</span></li></ul>';
+
+    expect(replayExtractor(spec('li.slot .when', 'slots'), page)).toEqual({
+      ok: true,
+      value: {
+        kind: 'slots',
+        slots: [
+          { id: 'Tue 8 Sep, 09:00', label: 'Tue 8 Sep, 09:00' },
+          { id: 'Thu 10 Sep, 14:00', label: 'Thu 10 Sep, 14:00' },
+        ],
+      },
+      matched: 2,
+      text: 'Tue 8 Sep, 09:00 Thu 10 Sep, 14:00',
+    });
+    expect(replayExtractor(spec('li.slot', 'slots', 'data-id'), page)).toMatchObject({
+      ok: true,
+      value: {
+        kind: 'slots',
+        slots: [
+          { id: 'tue-0900', label: 'Tue 8 Sep, 09:00' },
+          { id: 'thu-1400', label: 'Thu 10 Sep, 14:00' },
+        ],
+      },
+    });
+  });
+
+  it('reads an empty calendar as an empty listing, not as a broken selector', () => {
+    const page = '<ul><li class="empty">No appointments are available.</li></ul>';
+
+    expect(replayExtractor(spec('li.slot .when', 'slots'), page)).toEqual({
+      ok: true,
+      value: { kind: 'slots', slots: [] },
+      matched: 0,
+      text: '',
+    });
+  });
+
+  it('skips a matched slot with no text, and fails as empty when none has any', () => {
+    const page = '<ul><li class="slot"><span class="when"></span></li><li class="slot"><span class="when">Tue</span></li></ul>';
+
+    expect(replayExtractor(spec('li.slot .when', 'slots'), page)).toMatchObject({
+      ok: true,
+      value: { kind: 'slots', slots: [{ id: 'Tue', label: 'Tue' }] },
+      matched: 2,
+    });
+    expect(replayExtractor(spec('li.slot .when', 'slots'), '<ul><li class="slot"><span class="when"> </span></li></ul>')).toEqual({
+      ok: false,
+      failure: 'empty',
+      reason: 'li.slot .when matched, but no match has text',
+    });
+    // A slot whose id attribute is missing keeps its label as its id rather than dropping out of the listing.
+    expect(replayExtractor(spec('li.slot', 'slots', 'data-id'), '<ul><li class="slot">Tue</li></ul>')).toMatchObject({
+      ok: true,
+      value: { kind: 'slots', slots: [{ id: 'Tue', label: 'Tue' }] },
+    });
+  });
+
   it('digests the text of every matched element for a change watch', () => {
     const result = replayExtractor(spec('dl dd', 'digest'), NORMAL_PAGE);
     expect(result).toMatchObject({

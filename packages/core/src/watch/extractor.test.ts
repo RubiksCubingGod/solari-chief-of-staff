@@ -20,9 +20,9 @@ const SPEC = {
 };
 
 describe('the extractor vocabulary', () => {
-  it('has one strategy and two parsers so far', () => {
+  it('has one strategy and three parsers', () => {
     expect(EXTRACTOR_STRATEGIES).toEqual(['css']);
-    expect(EXTRACTOR_PARSERS).toEqual(['price', 'digest']);
+    expect(EXTRACTOR_PARSERS).toEqual(['price', 'digest', 'slots']);
     expect(EXTRACTOR_SPEC_VERSION).toBe(1);
   });
 
@@ -69,9 +69,9 @@ describe('parseExtractorSpec', () => {
 });
 
 describe('parserForKind', () => {
-  it('pairs each checkable kind with its parser and leaves slots to their own sprint', () => {
+  it('pairs every kind with its parser', () => {
     expect(parserForKind('price')).toBe('price');
     expect(parserForKind('change')).toBe('digest');
-    expect(parserForKind('slot')).toBeUndefined();
+    expect(parserForKind('slot')).toBe('slots');
   });
 });

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { compare, priceSatisfies, triggerDedupKey } from './comparator.js';
 import type { WatchCondition } from './condition.js';
-import type { DigestValue, PriceValue } from './value.js';
+import type { DigestValue, PriceValue, SlotListing, SlotsValue } from './value.js';
 
 /**
  * The trigger semantics from the sprint README: a trigger fires on a threshold
@@ -23,6 +23,14 @@ const BELOW_15: WatchCondition = { kind: 'price', drops_below: 15, rises_above: 
 const ABOVE_20: WatchCondition = { kind: 'price', drops_below: null, rises_above: 20 };
 const BETWEEN: WatchCondition = { kind: 'price', drops_below: 15, rises_above: 20 };
 const ANY_CHANGE: WatchCondition = { kind: 'change', region: null };
+const ANY_SLOT: WatchCondition = { kind: 'slot', site: 'fakedmv', applicant: { name: 'Ada' }, auto_book: false };
+
+const TUESDAY: SlotListing = { id: 'tue-0900', label: 'Tue 8 Sep, 09:00' };
+const THURSDAY: SlotListing = { id: 'thu-1400', label: 'Thu 10 Sep, 14:00' };
+
+function slots(...listed: SlotListing[]): SlotsValue {
+  return { kind: 'slots', slots: listed };
+}
 
 describe('priceSatisfies', () => {
   it('holds strictly below a drop threshold and strictly above a rise threshold', () => {
@@ -164,6 +172,47 @@ describe('compare for a change watch', () => {
   });
 });
 
+describe('compare for a slot watch', () => {
+  it('never triggers on an empty calendar, first look or not', () => {
+    expect(compare(ANY_SLOT, null, slots())).toEqual({ triggered: false, reason: 'no slots available' });
+    expect(compare(ANY_SLOT, slots(TUESDAY), slots())).toEqual({ triggered: false, reason: 'no slots available' });
+  });
+
+  it('triggers on the first slot that was not listed last time, naming it', () => {
+    expect(compare(ANY_SLOT, null, slots(TUESDAY))).toEqual({
+      triggered: true,
+      reason: 'slot Tue 8 Sep, 09:00 appeared',
+      slot: TUESDAY,
+    });
+    expect(compare(ANY_SLOT, slots(), slots(TUESDAY, THURSDAY))).toMatchObject({ triggered: true, slot: TUESDAY });
+    // First matching slot wins: the one that is new, not the one listed first.
+    expect(compare(ANY_SLOT, slots(TUESDAY), slots(TUESDAY, THURSDAY))).toEqual({
+      triggered: true,
+      reason: 'slot Thu 10 Sep, 14:00 appeared',
+      slot: THURSDAY,
+    });
+  });
+
+  it('never fires twice on the same listing', () => {
+    expect(compare(ANY_SLOT, slots(TUESDAY), slots(TUESDAY))).toEqual({
+      triggered: false,
+      reason: 'no slot that was not listed last time',
+    });
+    expect(compare(ANY_SLOT, slots(TUESDAY, THURSDAY), slots(THURSDAY)).triggered).toBe(false);
+  });
+
+  it('treats a previous value of another kind as no listing at all', () => {
+    expect(compare(ANY_SLOT, price(1), slots(TUESDAY)).triggered).toBe(true);
+  });
+
+  it('never triggers on a value that is not a listing', () => {
+    expect(compare(ANY_SLOT, null, price(1))).toEqual({
+      triggered: false,
+      reason: 'the extracted value is a price, not a slot list',
+    });
+  });
+});
+
 describe('triggerDedupKey', () => {
   it('is the same for the same watch, condition and value however they are spelled', () => {
     const one = triggerDedupKey('watch-1', BELOW_15, price(14.99));
@@ -184,6 +233,14 @@ describe('triggerDedupKey', () => {
     expect(triggerDedupKey('watch-1', ABOVE_20, price(14.99))).not.toBe(base);
     expect(triggerDedupKey('watch-1', BELOW_15, price(14.98))).not.toBe(base);
     expect(triggerDedupKey('watch-1', BELOW_15, price(14.99, 'EUR'))).not.toBe(base);
+  });
+
+  it('keys a slot listing by its ids alone, not by the labels shown to people', () => {
+    const a = triggerDedupKey('watch-1', ANY_SLOT, slots({ id: 'tue-0900', label: 'Tue' }));
+    const b = triggerDedupKey('watch-1', ANY_SLOT, slots({ id: 'tue-0900', label: 'Tuesday' }));
+
+    expect(a).toBe(b);
+    expect(triggerDedupKey('watch-1', ANY_SLOT, slots(THURSDAY))).not.toBe(a);
   });
 
   it('keys a digest value by its digest alone, not by the excerpt shown to people', () => {

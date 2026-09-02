@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 
 import { checkWatch, type CheckReport, type WatchCheckPorts } from './check.js';
 import type { FetchLadder } from './fetch/ladder.js';
+import type { SlotTriggerPort, SlotTriggerRequest } from './slot-trigger.js';
 
 /**
  * The composed check with every port faked in memory: what one tick writes
@@ -120,6 +121,44 @@ function failed(report: CheckReport): Extract<CheckReport, { kind: 'failed' }> {
   return report;
 }
 
+function observed(report: CheckReport): Extract<CheckReport, { kind: 'observed' }> {
+  if (report.kind !== 'observed') throw new Error(`expected an observed check, got ${report.kind}`);
+  return report;
+}
+
+const CALENDAR =
+  '<!doctype html><html><body><ul>' +
+  '<li class="dmv-slot"><span class="dmv-when">Tue 8 Sep, 09:00</span></li>' +
+  '<li class="dmv-slot"><span class="dmv-when">Thu 10 Sep, 14:00</span></li>' +
+  '</ul></body></html>';
+
+const TUESDAY = { id: 'Tue 8 Sep, 09:00', label: 'Tue 8 Sep, 09:00' };
+const THURSDAY = { id: 'Thu 10 Sep, 14:00', label: 'Thu 10 Sep, 14:00' };
+const LISTING = { kind: 'slots', slots: [TUESDAY, THURSDAY] } as const;
+
+const SLOT_WATCH: WatchRecord = {
+  ...WATCH,
+  kind: 'slot',
+  url: 'https://dmv.test/appointments',
+  extractor: { version: 1, strategy: 'css', selector: '.dmv-slot .dmv-when', attribute: null, parse: 'slots' },
+  condition: { site: 'fakedmv', applicant: { name: 'Ada Lovelace' }, auto_book: false },
+};
+
+/** A trigger port that remembers what it was asked and answers as told. */
+function recordingTrigger(armed: boolean): SlotTriggerPort & { readonly requests: readonly SlotTriggerRequest[] } {
+  const requests: SlotTriggerRequest[] = [];
+  return {
+    requests,
+    arm(request) {
+      requests.push(request);
+      const observation: ObservationRecord = { id: 'observation-port', watchId: request.watch.id, checkedAt: NOW, ...request.observation };
+      return Promise.resolve(
+        armed ? { armed: true, taskId: 'task-1', observation } : { armed: false, reason: 'already paused', observation },
+      );
+    },
+  };
+}
+
 describe('checkWatch between ticks', () => {
   it('parks a watch whose creator refuses under one reason that stays the same tick after tick', async () => {
     const store = memoryStore(WATCH);
@@ -162,6 +201,102 @@ describe('checkWatch between ticks', () => {
       second.reason,
     ]);
     expect(creator.requests()).toBe(1);
+    expect(notifier.calls).toEqual([]);
+  });
+});
+
+describe('checkWatch on a slot watch', () => {
+  it('hands the trigger the slot, the observation and the row patch in one call, and tells the person once it armed', async () => {
+    const store = memoryStore(SLOT_WATCH);
+    const trigger = recordingTrigger(true);
+    const notifier = createRecordingNotifier();
+    const ports: WatchCheckPorts = {
+      store,
+      ladder: servedLadder(CALENDAR),
+      creator: refusingCreator(),
+      notifier,
+      slotTrigger: trigger,
+      now: () => NOW,
+    };
+
+    const report = observed(await checkWatch(ports, store.row()));
+
+    expect(report.comparison).toEqual({ triggered: true, reason: 'slot Tue 8 Sep, 09:00 appeared', slot: TUESDAY });
+    expect(report.snipe).toMatchObject({ armed: true, taskId: 'task-1' });
+    expect(report.observation).toMatchObject({ triggered: true, value: LISTING });
+    expect(trigger.requests).toHaveLength(1);
+    expect(trigger.requests[0]).toMatchObject({
+      watch: { id: SLOT_WATCH.id },
+      condition: { kind: 'slot', site: 'fakedmv', auto_book: false },
+      slot: TUESDAY,
+      observation: { triggered: true, value: LISTING, error: null },
+      patch: { lastValue: LISTING, lastCheckedAt: NOW, consecutiveFailures: 0 },
+    });
+    // The port owns the write: nothing reached the store from the check itself.
+    expect(store.observations).toEqual([]);
+    expect(store.row()).toEqual(SLOT_WATCH);
+    expect(notifier.calls).toHaveLength(1);
+    expect(notifier.calls[0]).toMatchObject({ type: 'triggered', kind: 'slot', current: LISTING, reason: 'slot Tue 8 Sep, 09:00 appeared' });
+  });
+
+  it('tells nobody when the trigger found the watch already paused', async () => {
+    const store = memoryStore(SLOT_WATCH);
+    const trigger = recordingTrigger(false);
+    const notifier = createRecordingNotifier();
+    const ports: WatchCheckPorts = {
+      store,
+      ladder: servedLadder(CALENDAR),
+      creator: refusingCreator(),
+      notifier,
+      slotTrigger: trigger,
+      now: () => NOW,
+    };
+
+    const report = observed(await checkWatch(ports, store.row()));
+
+    expect(report.snipe).toMatchObject({ armed: false, reason: 'already paused' });
+    expect(trigger.requests).toHaveLength(1);
+    expect(notifier.calls).toEqual([]);
+  });
+
+  it('fails, without telling anyone, on a worker that has no trigger to arm', async () => {
+    const store = memoryStore(SLOT_WATCH);
+    const notifier = createRecordingNotifier();
+    const ports: WatchCheckPorts = {
+      store,
+      ladder: servedLadder(CALENDAR),
+      creator: refusingCreator(),
+      notifier,
+      now: () => NOW,
+    };
+
+    const report = failed(await checkWatch(ports, store.row()));
+
+    expect(report).toMatchObject({
+      transient: false,
+      reason: 'slot Tue 8 Sep, 09:00 appeared, but this worker has no booking trigger to arm',
+    });
+    expect(store.row()).toMatchObject({ status: 'active', lastValue: null, lastError: report.reason, consecutiveFailures: 1 });
+    expect(store.observations.map((record) => record.error)).toEqual([report.reason]);
+    expect(notifier.calls).toEqual([]);
+  });
+
+  it('records an empty calendar like any other quiet check, trigger or no trigger', async () => {
+    const store = memoryStore(SLOT_WATCH);
+    const notifier = createRecordingNotifier();
+    const ports: WatchCheckPorts = {
+      store,
+      ladder: servedLadder('<html><body><ul><li class="dmv-empty">No appointments</li></ul></body></html>'),
+      creator: refusingCreator(),
+      notifier,
+      now: () => NOW,
+    };
+
+    const report = observed(await checkWatch(ports, store.row()));
+
+    expect(report.comparison).toEqual({ triggered: false, reason: 'no slots available' });
+    expect(report.snipe).toBeUndefined();
+    expect(store.row()).toMatchObject({ status: 'active', lastValue: { kind: 'slots', slots: [] }, consecutiveFailures: 0 });
     expect(notifier.calls).toEqual([]);
   });
 });

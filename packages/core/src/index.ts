@@ -116,3 +116,4 @@ export * from './calendar/index.js';
 export * from './task-lifecycle.js';
 export * from './user-io.js';
 export * from './watch/index.js';
+export * from './book-slot.js';

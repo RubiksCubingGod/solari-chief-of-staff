@@ -16,14 +16,18 @@ import {
   type NewObservation,
   type NotifierPort,
   type ObservationRecord,
+  type TriggeredEvent,
+  type WatchCondition,
   type WatchPatch,
   type WatchRecord,
   type WatchStore,
+  type WatchValue,
 } from '@chief-of-staff/core';
-import type { Database, JobRegistration } from '@chief-of-staff/db';
+import { enqueueTaskRun, type Database, type JobRegistration } from '@chief-of-staff/db';
 
 import { fetchWatchPage, type FetchLadder } from './fetch/ladder.js';
 import { registerWatchScheduler, type WatchCheck } from './scheduler.js';
+import { createDrizzleSlotTrigger, type SlotTriggerPort, type SlotTriggerResult } from './slot-trigger.js';
 import { createDrizzleWatchStore } from './store.js';
 
 /**
@@ -39,12 +43,25 @@ import { createDrizzleWatchStore } from './store.js';
  * dedup key is what makes the second delivery one trigger. And every failure
  * lands in the row and the observations table before this returns, so the
  * state a person reads is never behind the state the process knows.
+ *
+ * A slot watch inverts the first ordering. Its sighting is not news until a
+ * booking is queued, and whether one gets queued is decided inside the
+ * trigger port's transaction (a watch already paused by a sibling check
+ * queues nothing), so the person is told after the arm and only when it
+ * armed. A delivery that fails there loses the heads-up, not the booking:
+ * the task is on the ledger, and its own outcome reaches them.
  */
 export interface WatchCheckPorts {
   readonly store: WatchStore;
   readonly ladder: FetchLadder;
   readonly creator: ExtractorCreator;
   readonly notifier: NotifierPort;
+  /**
+   * Where a slot watch's sighting goes. A worker without one cannot arm a
+   * booking, and a slot check on it fails rather than pretending: the row
+   * says so, and nobody is told a slot appeared that nothing will act on.
+   */
+  readonly slotTrigger?: SlotTriggerPort;
   readonly now?: () => Date;
 }
 
@@ -54,6 +71,8 @@ export type CheckReport =
       readonly observation: ObservationRecord;
       readonly comparison: Comparison;
       readonly route: ExtractionRoute;
+      /** How the trigger port answered, on a slot watch whose comparator found a slot. */
+      readonly snipe?: SlotTriggerResult;
     }
   | {
       readonly kind: 'failed';
@@ -133,21 +152,28 @@ export async function checkWatch(ports: WatchCheckPorts, watch: WatchRecord): Pr
   // did not move it, so a trigger after an outage is about the page.
   const previous = isWatchValue(watch.lastValue) ? watch.lastValue : null;
   const comparison = compare(condition, previous, extraction.value);
-  if (comparison.triggered) {
-    await ports.notifier.notify({
-      type: 'triggered',
-      watchId: watch.id,
-      userId: watch.userId,
-      url: watch.url,
-      occurredAt: checkedAt.toISOString(),
-      dedupKey: triggerDedupKey(watch.id, condition, extraction.value),
-      kind: watch.kind,
+  const event = triggeredEvent(watch, checkedAt, condition, previous, extraction.value, comparison);
+
+  if (condition.kind === 'slot' && comparison.slot !== undefined) {
+    if (ports.slotTrigger === undefined) {
+      const reason = `${comparison.reason}, but this worker has no booking trigger to arm`;
+      return fail(ports, watch, checkedAt, outcome.tier, reason, false);
+    }
+    // The port writes the observation and the row itself, in the transaction
+    // that pauses the watch and queues the task.
+    const next = successObservation(outcome.tier, extraction.value, true);
+    const snipe = await ports.slotTrigger.arm({
+      watch,
       condition,
-      previous,
-      current: extraction.value,
-      reason: comparison.reason,
+      slot: comparison.slot,
+      observation: next,
+      patch: patchAfterObservation(watch, next, checkedAt),
     });
+    if (snipe.armed) await ports.notifier.notify(event);
+    return { kind: 'observed', observation: snipe.observation, comparison, route: extraction.route, snipe };
   }
+
+  if (comparison.triggered) await ports.notifier.notify(event);
   const observation = await record(
     ports,
     watch,
@@ -155,6 +181,29 @@ export async function checkWatch(ports: WatchCheckPorts, watch: WatchRecord): Pr
     successObservation(outcome.tier, extraction.value, comparison.triggered),
   );
   return { kind: 'observed', observation, comparison, route: extraction.route };
+}
+
+function triggeredEvent(
+  watch: WatchRecord,
+  checkedAt: Date,
+  condition: WatchCondition,
+  previous: WatchValue | null,
+  current: WatchValue,
+  comparison: Comparison,
+): TriggeredEvent {
+  return {
+    type: 'triggered',
+    watchId: watch.id,
+    userId: watch.userId,
+    url: watch.url,
+    occurredAt: checkedAt.toISOString(),
+    dedupKey: triggerDedupKey(watch.id, condition, current),
+    kind: watch.kind,
+    condition,
+    previous,
+    current,
+    reason: comparison.reason,
+  };
 }
 
 async function fail(
@@ -199,18 +248,28 @@ export interface WatchEngineOptions {
   readonly ladder: FetchLadder;
   readonly creator: ExtractorCreator;
   readonly notifier: NotifierPort;
+  /** Defaults to the Drizzle trigger, which enqueues the queued task on the harness the engine registers on. */
+  readonly slotTrigger?: SlotTriggerPort;
   readonly now?: () => Date;
 }
 
 /** The whole engine as one registration: the scheduler with the real check behind it. */
 export function registerWatchEngine(options: WatchEngineOptions): JobRegistration {
   const store = createDrizzleWatchStore(options.db);
-  const ports: WatchCheckPorts = {
-    store,
-    ladder: options.ladder,
-    creator: options.creator,
-    notifier: options.notifier,
-    ...(options.now === undefined ? {} : { now: options.now }),
+  return async (harness) => {
+    const slotTrigger =
+      options.slotTrigger ??
+      createDrizzleSlotTrigger(options.db, async (taskId) => {
+        await enqueueTaskRun({ db: options.db.db, harness }, taskId);
+      });
+    const ports: WatchCheckPorts = {
+      store,
+      ladder: options.ladder,
+      creator: options.creator,
+      notifier: options.notifier,
+      slotTrigger,
+      ...(options.now === undefined ? {} : { now: options.now }),
+    };
+    await registerWatchScheduler({ db: options.db, store, check: createWatchCheck(ports) })(harness);
   };
-  return registerWatchScheduler({ db: options.db, store, check: createWatchCheck(ports) });
 }

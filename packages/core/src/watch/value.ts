@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
 /**
- * What a check extracts from a page, in the two shapes this sprint knows.
+ * What a check extracts from a page, in the three shapes the engine knows.
  *
  * A value is what gets compared, persisted as the observation's `value` and the
  * watch's `last_value`, and shown to a person in a trigger. It is plain JSON
@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
  * the value that was written and equality is not a question of spelling.
  */
 
-export const WATCH_VALUE_KINDS = ['price', 'digest'] as const;
+export const WATCH_VALUE_KINDS = ['price', 'digest', 'slots'] as const;
 export type WatchValueKind = (typeof WATCH_VALUE_KINDS)[number];
 
 export interface PriceValue {
@@ -30,7 +30,29 @@ export interface DigestValue {
   readonly excerpt: string;
 }
 
-export type WatchValue = PriceValue | DigestValue;
+/** One appointment a calendar lists as bookable. */
+export interface SlotListing {
+  /**
+   * What makes this the same slot next time: an attribute the extractor read,
+   * or the label itself when the page has nothing steadier. Two listings with
+   * one id are one slot, however the page renders them.
+   */
+  readonly id: string;
+  /** The slot as the page prints it, for the person and for the booking arm. */
+  readonly label: string;
+}
+
+/**
+ * Every slot a calendar offers right now, in page order. An empty list is a
+ * value, not a failure: a calendar with nothing open is the steady state a
+ * slot watch spends most of its life reading.
+ */
+export interface SlotsValue {
+  readonly kind: 'slots';
+  readonly slots: readonly SlotListing[];
+}
+
+export type WatchValue = PriceValue | DigestValue | SlotsValue;
 
 /** The symbols a page is likely to print instead of a currency code. */
 const CURRENCY_SYMBOLS: Readonly<Record<string, string>> = {
@@ -123,7 +145,16 @@ export function isWatchValue(value: unknown): value is WatchValue {
   if (record['kind'] === 'digest') {
     return typeof record['digest'] === 'string' && typeof record['excerpt'] === 'string';
   }
+  if (record['kind'] === 'slots') {
+    return Array.isArray(record['slots']) && record['slots'].every(isSlotListing);
+  }
   return false;
+}
+
+export function isSlotListing(value: unknown): value is SlotListing {
+  if (typeof value !== 'object' || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return typeof record['id'] === 'string' && typeof record['label'] === 'string';
 }
 
 /**
@@ -132,9 +163,14 @@ export function isWatchValue(value: unknown): value is WatchValue {
  * price, and dedup has to say so.
  */
 export function valueIdentity(value: WatchValue): Record<string, unknown> {
-  return value.kind === 'price'
-    ? { kind: 'price', amount: value.amount, currency: value.currency }
-    : { kind: 'digest', digest: value.digest };
+  switch (value.kind) {
+    case 'price':
+      return { kind: 'price', amount: value.amount, currency: value.currency };
+    case 'digest':
+      return { kind: 'digest', digest: value.digest };
+    case 'slots':
+      return { kind: 'slots', ids: value.slots.map((slot) => slot.id) };
+  }
 }
 
 export function sameValue(left: WatchValue, right: WatchValue): boolean {

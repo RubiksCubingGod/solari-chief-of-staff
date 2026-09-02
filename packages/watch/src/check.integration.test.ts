@@ -148,7 +148,6 @@ function proposing(...selectors: readonly string[]): {
           });
         }
         const parse = parserForKind(request.kind);
-        if (parse === undefined) throw new Error(`no parser for ${request.kind} watches`);
         const spec: ExtractorSpec = { version: EXTRACTOR_SPEC_VERSION, strategy: 'css', selector, attribute: null, parse };
         const replay = replayExtractor(spec, request.html);
         return Promise.resolve(

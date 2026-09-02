@@ -57,7 +57,7 @@ export function createDrizzleWatchStore(database: Pick<Database, 'db'>): WatchSt
   };
 }
 
-function toWatchRecord(row: WatchRow): WatchRecord {
+export function toWatchRecord(row: WatchRow): WatchRecord {
   return {
     id: row.id,
     userId: row.userId,
@@ -77,7 +77,7 @@ function toWatchRecord(row: WatchRow): WatchRecord {
   };
 }
 
-function toObservationRecord(row: ObservationRow): ObservationRecord {
+export function toObservationRecord(row: ObservationRow): ObservationRecord {
   return {
     id: row.id,
     watchId: row.watchId,
@@ -89,7 +89,7 @@ function toObservationRecord(row: ObservationRow): ObservationRecord {
   };
 }
 
-function valuesOf(watchId: string, observation: NewObservation): typeof observations.$inferInsert {
+export function valuesOf(watchId: string, observation: NewObservation): typeof observations.$inferInsert {
   return {
     watchId,
     tierUsed: observation.tierUsed,
@@ -100,7 +100,7 @@ function valuesOf(watchId: string, observation: NewObservation): typeof observat
 }
 
 /** Only the columns the patch names. `undefined` is "not mentioned"; `null` is a value. */
-function columnsOf(patch: WatchPatch): WatchColumns {
+export function columnsOf(patch: WatchPatch): WatchColumns {
   const columns: WatchColumns = {};
   if (patch.extractor !== undefined) columns.extractor = patch.extractor;
   if (patch.health !== undefined) columns.health = patch.health;

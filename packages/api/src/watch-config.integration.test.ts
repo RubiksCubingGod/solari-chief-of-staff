@@ -180,12 +180,26 @@ describe('POST /watches, as the engine reads it back', () => {
     await expect(app.db.select().from(watches)).resolves.toEqual([]);
   });
 
-  it('refuses a slot watch until slot-sniping teaches the engine to check one', async () => {
-    const response = await post({ ...PRICE_WATCH, kind: 'slot', condition: {} });
-
-    expect(response.statusCode).toBe(400);
-    expect(paths(response.body)).toEqual(['/kind']);
+  it('persists a slot watch the trigger can act on, and refuses one with nobody to book for', async () => {
+    const refused = await post({ ...PRICE_WATCH, kind: 'slot', condition: { site: 'fakedmv' } });
+    expect(refused.statusCode).toBe(400);
+    expect(paths(refused.body)).toEqual(['/condition/applicant']);
     await expect(app.db.select().from(watches)).resolves.toEqual([]);
+
+    const response = await post({
+      ...PRICE_WATCH,
+      kind: 'slot',
+      condition: { site: 'fakedmv', applicant: { name: 'Ada Lovelace' } },
+    });
+    expect(response.statusCode).toBe(201);
+    const { id } = response.json() as { id: string };
+    const record = await loadAsEngine(id);
+    expect(parseCondition(record.kind, record.condition)).toEqual({
+      kind: 'slot',
+      site: 'fakedmv',
+      applicant: { name: 'Ada Lovelace' },
+      auto_book: false,
+    });
   });
 });
 

@@ -26,15 +26,48 @@ export interface ChangeCondition {
   readonly region: string | null;
 }
 
-export type WatchCondition = PriceCondition | ChangeCondition;
+/** Who the booking is for. What a site's form asks, and no more than a slot watch needs. */
+export interface SlotApplicant {
+  readonly name: string;
+}
+
+export interface SlotCondition {
+  readonly kind: 'slot';
+  /** The site a booking playbook is registered for: `fakedmv`. */
+  readonly site: string;
+  readonly applicant: SlotApplicant;
+  /**
+   * Book without asking. Off by default: the booking arm asks the person
+   * before it submits, per the s5 consequence posture.
+   */
+  readonly auto_book: boolean;
+}
+
+export type WatchCondition = PriceCondition | ChangeCondition | SlotCondition;
 
 const PRICE_KEYS: ReadonlySet<string> = new Set(['drops_below', 'rises_above']);
 const CHANGE_KEYS: ReadonlySet<string> = new Set(['region']);
+const SLOT_KEYS: ReadonlySet<string> = new Set(['site', 'applicant', 'auto_book']);
+const APPLICANT_KEYS: ReadonlySet<string> = new Set(['name']);
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+/** A name for a form: text with something in it. */
+function nonBlank(value: unknown): value is string {
+  return typeof value === 'string' && value.trim() !== '';
+}
+
+/** The applicant a slot condition holds, or `undefined` when it holds anything else. */
+export function parseApplicant(value: unknown): SlotApplicant | undefined {
+  const record = asRecord(value);
+  if (record === undefined) return undefined;
+  if (!Object.keys(record).every((key) => APPLICANT_KEYS.has(key))) return undefined;
+  const name = record['name'];
+  return nonBlank(name) ? { name: name.trim() } : undefined;
 }
 
 /** An absent threshold, spelled either way, is null; anything but a finite number is a refusal. */
@@ -46,8 +79,8 @@ function threshold(value: unknown): number | null | undefined {
 /**
  * The condition a stored `condition` column holds for a watch of `kind`, or
  * `undefined` when it does not hold one: unknown keys, a threshold that is not
- * a finite number, a price watch with no threshold at all, or a kind this
- * sprint does not check.
+ * a finite number, a price watch with no threshold at all, a slot watch with
+ * no site or no applicant.
  */
 export function parseCondition(kind: WatchKind, value: unknown): WatchCondition | undefined {
   const record = asRecord(value);
@@ -69,8 +102,14 @@ export function parseCondition(kind: WatchKind, value: unknown): WatchCondition 
       if (region !== null && (typeof region !== 'string' || region.trim() === '')) return undefined;
       return { kind: 'change', region };
     }
-    case 'slot':
-      return undefined;
+    case 'slot': {
+      if (!keys.every((key) => SLOT_KEYS.has(key))) return undefined;
+      const site = record['site'];
+      const applicant = parseApplicant(record['applicant']);
+      const autoBook = record['auto_book'] ?? false;
+      if (!nonBlank(site) || applicant === undefined || typeof autoBook !== 'boolean') return undefined;
+      return { kind: 'slot', site: site.trim(), applicant, auto_book: autoBook };
+    }
   }
 }
 
@@ -78,6 +117,9 @@ export function parseCondition(kind: WatchKind, value: unknown): WatchCondition 
 export function describeCondition(condition: WatchCondition): string {
   if (condition.kind === 'change') {
     return condition.region === null ? 'the page changes' : `${condition.region} changes`;
+  }
+  if (condition.kind === 'slot') {
+    return `an appointment slot appears on ${condition.site}`;
   }
   const clauses: string[] = [];
   if (condition.drops_below !== null) clauses.push(`drops below ${String(condition.drops_below)}`);

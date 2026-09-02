@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import type { PriceCondition, WatchCondition } from './condition.js';
-import { type PriceValue, type WatchValue, valueIdentity } from './value.js';
+import { type PriceValue, type SlotListing, type WatchValue, valueIdentity } from './value.js';
 
 /**
  * Step 3 of a check (ARCHITECTURE §3.1): the new value against the last one.
@@ -18,6 +18,8 @@ export interface Comparison {
   readonly triggered: boolean;
   /** In words, for the observation and for the person: why, or why not. */
   readonly reason: string;
+  /** For a slot watch that triggered: the slot to book, the first one the last observation did not list. */
+  readonly slot?: SlotListing;
 }
 
 /**
@@ -96,14 +98,38 @@ function compareChange(previous: WatchValue | null, current: WatchValue): Compar
     : { triggered: true, reason: 'content changed' };
 }
 
+/**
+ * A slot watch fires on a slot that was not listed last time. The same
+ * listing twice is one slot, however long it stays open, which is what keeps
+ * a declined slot from being offered again on every check; a slot that went
+ * and came back is listed again against a baseline without it, and is news.
+ * First listed wins: the README's "first matching slot", with no ranking.
+ */
+function compareSlots(previous: WatchValue | null, current: WatchValue): Comparison {
+  if (current.kind !== 'slots') {
+    return { triggered: false, reason: `the extracted value is a ${current.kind}, not a slot list` };
+  }
+  if (current.slots.length === 0) return { triggered: false, reason: 'no slots available' };
+  const listed = new Set(previous?.kind === 'slots' ? previous.slots.map((slot) => slot.id) : []);
+  const fresh = current.slots.find((slot) => !listed.has(slot.id));
+  return fresh === undefined
+    ? { triggered: false, reason: 'no slot that was not listed last time' }
+    : { triggered: true, reason: `slot ${fresh.label} appeared`, slot: fresh };
+}
+
 export function compare(
   condition: WatchCondition,
   previous: WatchValue | null,
   current: WatchValue,
 ): Comparison {
-  return condition.kind === 'price'
-    ? comparePrice(condition, previous, current)
-    : compareChange(previous, current);
+  switch (condition.kind) {
+    case 'price':
+      return comparePrice(condition, previous, current);
+    case 'change':
+      return compareChange(previous, current);
+    case 'slot':
+      return compareSlots(previous, current);
+  }
 }
 
 /**

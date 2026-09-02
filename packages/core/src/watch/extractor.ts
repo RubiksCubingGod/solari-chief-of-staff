@@ -16,7 +16,7 @@ export const EXTRACTOR_STRATEGIES = ['css'] as const;
 export type ExtractorStrategy = (typeof EXTRACTOR_STRATEGIES)[number];
 
 /** How the matched text becomes a value. Each parser produces one value kind. */
-export const EXTRACTOR_PARSERS = ['price', 'digest'] as const;
+export const EXTRACTOR_PARSERS = ['price', 'digest', 'slots'] as const;
 export type ExtractorParser = (typeof EXTRACTOR_PARSERS)[number];
 
 export interface ExtractorSpec {
@@ -57,17 +57,14 @@ export function hasExtractor(value: unknown): boolean {
   return parseExtractorSpec(value) !== undefined;
 }
 
-/**
- * The parser a watch of this kind needs its extractor to use, or `undefined`
- * for a kind this sprint does not check. Slot watches are slot-sniping's (s8).
- */
-export function parserForKind(kind: WatchKind): ExtractorParser | undefined {
+/** The parser a watch of this kind needs its extractor to use. */
+export function parserForKind(kind: WatchKind): ExtractorParser {
   switch (kind) {
     case 'price':
       return 'price';
     case 'change':
       return 'digest';
     case 'slot':
-      return undefined;
+      return 'slots';
   }
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { describeCondition, parseCondition } from './condition.js';
+import { describeCondition, parseApplicant, parseCondition } from './condition.js';
 
 describe('parseCondition for a price watch', () => {
   it('accepts either threshold or both, defaulting the other to null', () => {
@@ -65,8 +65,44 @@ describe('parseCondition for a change watch', () => {
 });
 
 describe('parseCondition for a slot watch', () => {
-  it('is not this sprint', () => {
-    expect(parseCondition('slot', {})).toBeUndefined();
+  it('reads the site, the applicant and whether to book without asking', () => {
+    expect(parseCondition('slot', { site: 'fakedmv', applicant: { name: 'Ada Lovelace' }, auto_book: true })).toEqual({
+      kind: 'slot',
+      site: 'fakedmv',
+      applicant: { name: 'Ada Lovelace' },
+      auto_book: true,
+    });
+  });
+
+  it('defaults to asking first, and trims what the person typed', () => {
+    expect(parseCondition('slot', { site: ' fakedmv ', applicant: { name: ' Ada ' } })).toEqual({
+      kind: 'slot',
+      site: 'fakedmv',
+      applicant: { name: 'Ada' },
+      auto_book: false,
+    });
+  });
+
+  it.each([
+    ['nothing', {}],
+    ['no applicant', { site: 'fakedmv' }],
+    ['a blank site', { site: ' ', applicant: { name: 'Ada' } }],
+    ['a non-string site', { site: 3, applicant: { name: 'Ada' } }],
+    ['an applicant with no name', { site: 'fakedmv', applicant: {} }],
+    ['an applicant with a blank name', { site: 'fakedmv', applicant: { name: '' } }],
+    ['an applicant that is not an object', { site: 'fakedmv', applicant: 'Ada' }],
+    ['an applicant with extra fields', { site: 'fakedmv', applicant: { name: 'Ada', email: 'ada@example.test' } }],
+    ['a non-boolean auto_book', { site: 'fakedmv', applicant: { name: 'Ada' }, auto_book: 'yes' }],
+    ['an unknown key', { site: 'fakedmv', applicant: { name: 'Ada' }, drops_below: 15 }],
+    ['a non-object', 'fakedmv'],
+  ])('refuses %s', (_label, value) => {
+    expect(parseCondition('slot', value)).toBeUndefined();
+  });
+
+  it('exposes the applicant parser for the door and the task input to share', () => {
+    expect(parseApplicant({ name: 'Ada' })).toEqual({ name: 'Ada' });
+    expect(parseApplicant(null)).toBeUndefined();
+    expect(parseApplicant([])).toBeUndefined();
   });
 });
 
@@ -86,5 +122,11 @@ describe('describeCondition', () => {
   it('says what a change condition watches', () => {
     expect(describeCondition({ kind: 'change', region: null })).toBe('the page changes');
     expect(describeCondition({ kind: 'change', region: 'the headline' })).toBe('the headline changes');
+  });
+
+  it('says where a slot condition waits for an appointment', () => {
+    expect(
+      describeCondition({ kind: 'slot', site: 'fakedmv', applicant: { name: 'Ada' }, auto_book: false }),
+    ).toBe('an appointment slot appears on fakedmv');
   });
 });
