@@ -53,7 +53,7 @@ function attempt(step: (page: Page) => Promise<unknown>): Promise<GuardedRun<'re
   return guardedSession({ provider, policy }, async (page) => {
     await page.goto(`${lane}/`);
     await step(page);
-    return 'reached';
+    return 'reached' as const;
   });
 }
 
