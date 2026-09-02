@@ -330,6 +330,61 @@ until that sibling task finishes.
   (`check-worker`), and `check-unit` covers the log notifier and the client
   factory.
 
+### harden-parked-reason-stable
+
+- **Shape.** `parkedReason(lastError)` in `packages/agent/src/healing.ts`: a
+  `last_error` already in the "no extractor: …; reset the watch to try again"
+  frame is handed back as it is; anything else (a creation failure's own
+  words, or null, which reads "the last attempt to write one failed") is
+  framed once. Nothing else moves: `createFirst` still asks the creator only
+  when the row is not parked, and the check's write-back is unchanged.
+- **Proof.** `packages/watch/src/check.test.ts` is new: the composed
+  `checkWatch` over in-file fakes (a memory store with the Drizzle store's
+  merge rule, a ladder whose first tier serves one page, a refusing creator,
+  the recording notifier). Three ticks: the first parks the row with the
+  creator's reason, the second frames it, the third reads the same frame; one
+  creation request, no event, three error observations. Red recorded through
+  `nah verify` from this hardening session (13:43:21Z, HEAD a5375a0, exit 1,
+  "no extractor: no extractor:"), which works here because
+  `nah task update --status in_progress --from pending` opened an execution.
+  `healing.test.ts` gains the unit statement (a parked row yields its own
+  reason, no request). The check integration suite, unchanged, is a green
+  proof of this task, so check-pipeline-integration's binding on it is not
+  disturbed.
+- **Gate rescoped.** `tsc -p tsconfig.test.json --noEmit` was the planned
+  gate; at 13:44:30Z it reports one error, in the untracked
+  `packages/playbooks/src/guardrails/request-context.integration.test.ts`
+  (action-playbooks' hardening, in flight), and nothing in this sprint's
+  files. The gate is `tsc --build packages/agent packages/watch` (exit 0,
+  13:44:58Z), like the other tasks' gates; the test files were typechecked
+  by that same workspace run, which named none of them. ESLint over the three
+  files: exit 0.
+
+### harden-two-sided-crossing
+
+- **Shape.** `comparePrice` in `packages/core/src/watch/comparator.ts` now
+  judges each bound on its own. `sidesOf(condition, value)` says which bound
+  a price is past (at most one can be); a trigger is a bound the current
+  price is past that the previous price was not, so a swing from below the
+  floor to above the ceiling is news, and "still" names the bound the price
+  is still past. `priceSatisfies`, the condition parser, the descriptions and
+  `triggerDedupKey` are unchanged, and so is every one-sided case: the
+  existing comparator tests pass untouched.
+- **Proof.** Two cases in `comparator.test.ts`: the swing both ways
+  (21 after 14 → "price 21 rises above 20"; 14 after 21 → "price 14 drops
+  below 15") and the same-side moves (13 after 14 → "still drops below 15";
+  22 after 21 → "still rises above 20"). Red recorded through `nah verify`
+  (14:56:25Z, HEAD 56f858c, exit 1, "still rises above 20"). Green is the
+  core suite under its full-coverage gate (14 files, 203 tests, exit 0,
+  14:58:07Z); `tsc --build packages/core` and ESLint over both files exit 0.
+- **Assumption recorded.** The parser does not order the bounds, so a
+  condition with its floor above its ceiling (`drops_below 20, rises_above
+  15`) puts every price between them past both bounds at once. Such a price
+  triggers once, worded as the floor crossing (`crossingWords` prefers the
+  floor), and reads "still drops below" after; the person asked for both and
+  gets one. Rejecting an inverted pair is an acceptance change for the config
+  surface and is left as a round-2 observation.
+
 ### Incidents
 
 - Concurrent edits in the shared checkout: the action-playbooks session was
@@ -370,34 +425,177 @@ until that sibling task finishes.
   outside command-proof coverage. They are documentation of the worker the
   `check-worker` proof runs; the same finding was accepted for
   watch-config-surface's README change. No proof was red.
+- During hardening, `tsc -p tsconfig.test.json --noEmit` picked up a type
+  error in action-playbooks' untracked
+  `packages/playbooks/src/guardrails/request-context.integration.test.ts`.
+  Not this sprint's file, not touched; the harden gate was scoped to the
+  package build instead.
+- The round-2 reconciles ran as a chain that waits for a quiet checkout. The
+  laptop slept 16:01Z-17:36Z and again before 19:15Z while it waited; the
+  sibling's full-suite coverage runs resumed after each wake, and the chain
+  ran each finish in the gaps (17:41Z, 17:43Z, 19:20Z).
+
+### hardening
+
+Round 1 (2026-09-02T13:23Z, attempt `attempt-rcafc4cbd23ba4fda81500671f54d5f14`,
+request `hardening-h87ef3527fe6a88ab`, HEAD b37d057). Audited consumer-backward
+across acceptance behaviour, failure paths, composition, testing posture, spec
+adherence and repository patterns: the core watch domain, the watch package,
+the agent's extractor and healing steps, the API's watch routes and the worker.
+
+**Implementation gaps (repair tasks, `origin: hardening`).**
+
+- `needs-extractor-reason-rewrap` (medium). Surface: `createFirst` in
+  `packages/agent/src/healing.ts`, written back by `fail()` in
+  `packages/watch/src/check.ts`. Claim (extractor-lifecycle): the watch stays in
+  needs-extractor state with the error recorded. Gap: the parked reason wraps
+  `watch.lastError`, and `lastError` is the previous tick's reason, so
+  `last_error` and every error observation grow by one
+  "no extractor: …; reset the watch to try again" frame per tick; the third
+  tick already reads "no extractor: no extractor: …; reset…; reset…". Proof
+  gap: `healing.test.ts` and `check.integration.test.ts` stop at the second
+  tick. Repair: `harden-parked-reason-stable`.
+- `two-sided-crossing-suppressed` (medium). Surface: `comparePrice` in
+  `packages/core/src/watch/comparator.ts`. Claim (README, watch-check-path): a
+  trigger fires on a threshold crossing. Gap: `before` is the whole condition's
+  satisfaction, not the bound's, so with `drops_below 15` and `rises_above 20` a
+  reading of 21 after 14 is "price 21 still rises above 20" and the person is
+  never told. Proof gap: `comparator.test.ts` has no swing across both bounds.
+  Repair: `harden-two-sided-crossing`.
+
+**Evidence findings (non-blocking, carried).** Every direct run below is at
+HEAD b37d057 on 2026-09-02, outside `nah verify`, which refuses from this
+stage; the bindings stay stale, the behaviour behind them is current.
+
+- `check-worker` stale: action-playbooks changed `scripts/worker.mjs` after the
+  receipt (9e45bdc, b70e32f: builds the playbooks package, registers the task
+  engine beside the watch engine). Direct run 13:30:36Z–13:31:10Z of
+  `node scripts/vitest.mjs run --project integration tests/process-entry-points.integration.test.ts`:
+  2 passed, 2 skipped, exit 0.
+- `config-unit`, `config-integration`, `config-types` stale: siblings changed
+  `packages/api/src/errors.ts` and `app.ts`. Direct runs: the `config-types`
+  argv exit 0 (13:30:34Z); the `config-unit` argv 19 files, 222 tests under
+  the coverage gate, exit 0 (13:31Z); `config-integration` see the round-1
+  addendum below.
+- `domain-red` reported missing: its receipt (04:43:13Z, exit 1 as a red
+  should) predates a rewording of the row. The argv today passes, 150 tests,
+  as an implemented red does.
+- `ladder-unit` reported missing: its only receipt (05:24:14Z, rev 8d7b95f)
+  failed on `packages/core/src/user-io.test.ts`, a sibling's file mid-edit at
+  that moment, and the row was reworded after. Direct run: 17 files, 226 tests
+  under the coverage gate, exit 0 (13:31Z).
+- `extractor-live`: both receipts (05:36:55Z, 06:47:12Z) are "1 skipped". The
+  @live-llm suite skips without `ANTHROPIC_LIVE_LLM`, which this runner does
+  not set (README external gate, owner RubiksCubingGod). Real creation has not
+  been exercised in this checkout.
+- ESLint over the sprint's files and `tsc -p tsconfig.test.json --noEmit` both
+  exit 0 at b37d057; the sibling's `task-detail` test error is gone.
+
+**Observations, no repair (below medium, or the spec's own choice).**
+
+- Dedup keys are content-only: a trigger is (watch, condition, value), a block
+  is (watch, tiers, signal). A change watch that goes A→B→A, or a watch blocked
+  again after recovering, repeats a key; the consumer (s7) needs a time window
+  on its dedup. The key is the spec's.
+- A block transition overwrites `needs_extractor` and `degraded`, so a site
+  that alternates refusing and serving buys one creation call per
+  block→serve transition. Read as one call per incident, the incident being
+  the block; bounded by transitions, each of which is reported.
+- `packages/watch/src/check.ts` had no unit-level proof; every branch was
+  proven through Postgres and the fixtures. `harden-parked-reason-stable`
+  adds `check.test.ts` with in-file fakes, the watch package's pattern.
+- The diagnostics readiness warnings (spec sections, task count, browser
+  proofs outside a declared boundary, no `resolution_kind` on
+  check-pipeline-integration) are planning-level; none is an implementation
+  gap, and the accepted revision is not touched here.
+- An observation's `checked_at` is the database's clock; the row's
+  `last_checked_at` is the check's `now` port. Identical in production.
+- The block classifier's text markers ("access denied", "attention required")
+  can misread a product page that quotes them; real-site tuning is s9's.
+
+**Round 2** (2026-09-02T15:20Z onward, same attempt
+`attempt-rcafc4cbd23ba4fda81500671f54d5f14`, after both repairs landed as
+56f858c and dde302f). Fresh dimensions, not the implementation narrative: the
+operator's remedies, what runs concurrently, what a row can hold, what the
+worker will fetch, and whether the two repairs hold through the composed path.
+
+- **Remedy audit.** Every parked reason ends "reset the watch to try again";
+  `POST /watches/:id/tier-reset` sets `health` back to `healthy` and leaves
+  `lastError` as the record, so the next tick asks the creator again
+  (`createFirst` asks whenever the row is not parked). The remedy the row
+  names exists and does what the row implies. No gap.
+- **Concurrency.** One cron schedule per active watch, keyed by id; a paused
+  or deleted row is skipped by the tick and unscheduled by the sweep. pg-boss
+  debounces cron sends per key within a minute only, so a tick that outlives
+  the five-minute floor (all three tiers timing out on four attempts) can
+  overlap the next; recorded in DEFERRED.md as below medium.
+- **Row contents.** The parser accepts a floor above its ceiling; the
+  comparator then prefers the floor's words and triggers once. The `Sides`
+  comment claimed the case impossible and was corrected in this round
+  (537c84e, `crossing-unit` 14 files 203 tests under the coverage gate and
+  `crossing-types`, both exit 0); rejecting the pair is a config-surface
+  acceptance
+  change, deferred.
+- **Fetch policy.** A watch URL only has to be http or https; private
+  addresses are fetched. Single-operator deployment; deferred for a shared
+  one.
+- **Composition of the repairs.** Direct runs at bc651d9 (the sibling's fix
+  of its playbooks test), outside `nah verify`:
+  `packages/watch/src/check.integration.test.ts` 6 passed, exit 0
+  (15:20:56Z); `packages/api/src/watch-config.integration.test.ts` 10
+  passed, exit 0 (15:21:52Z). Workspace typecheck
+  `tsc -p tsconfig.test.json --noEmit` exit 0 at d0c0acc (15:29:45Z–15:30:32Z);
+  the sibling's untracked test that broke it in round 1 is committed and
+  clean. A first combined run of both integration files timed out in
+  `startTestPostgres` while a sibling ran `node scripts/check.mjs` (the
+  full suite under coverage); the reruns above were taken after it exited.
+- **Stale evidence after the repairs.** Re-earned in place with a bare
+  `nah task finish <done-task>`, which reruns that task's stale greens and
+  commits fresh receipts: `check-pipeline-integration` 4fc73da
+  (`check-integration` 6 passed, `check-unit` 5 files 27 tests,
+  `check-worker` 2 passed 2 skipped, `check-types`); `watch-config-surface`
+  d0c0acc (`config-unit` 19 files 224 tests under the coverage gate,
+  `config-integration` 10 passed, `config-types`); `browser-tier-fetcher`
+  f24e76d (`ladder-unit` 18 files 229 tests under the coverage gate, green;
+  `ladder-integration` 4 failed of 5 at 15:30:03Z–15:37:07Z, every failure
+  "fetch failed at the browser tier: timeout: no response within 60000ms",
+  taken while the sibling's full-suite coverage run started at 15:30:07Z;
+  recorded by NAH as a non-blocking proof finding) and re-earned at 8c82edc
+  once the checkout was quiet (17:43:04Z-17:46:38Z: `ladder-unit` 18 files
+  229 tests, `ladder-integration` 5 passed, `ladder-types`, all exit 0);
+  `tier0-http-fetcher` 716f376 (19:20:41Z-19:21:54Z: `tier0-unit` 18 files
+  229 tests under the coverage gate, `tier0-integration` 5 files 32 tests,
+  both exit 0; README.md had been changed by a sibling after the receipt).
+  `watch-domain-model` is left as is:
+  its `domain-red` reads missing because the row was reworded after the
+  receipt, and rerunning a red after implementation records a failed red;
+  `domain-green`'s argv is `crossing-unit`'s argv, green at 537c84e, and
+  `nah --json diagnostics` at 716f376 (19:22Z) reports no readiness finding
+  and `domain-green` as the one receipt left to refresh at implementation
+  closure, which the request refresh below performs.
+- **Round-1 addendum, `config-integration`.** Direct run 13:38:57Z at
+  a5375a0: 10 passed, exit 0.
+
+No critical, high or medium implementation gap remains. Fingerprints from
+round 1 (`needs-extractor-reason-rewrap`, `two-sided-crossing-suppressed`)
+are closed by their tasks' receipts and did not recur. Round cap is 3; this
+stops at 2.
 
 ### Next
 
-Implementation is complete (8/8) and hardening is requested:
-`nah stage implementation-complete watch-engine attempt-r87ba4b1d86db435f8b09ec71f97a5ce6`
-returned `assurance-requested`, request `hardening-h87ef3527fe6a88ab`. The
-transition refreshed thirteen proofs whose covered files had moved and
-carried three findings into the request:
+Hardening rounds 1 and 2 are recorded above; no critical, high or medium gap
+remains, so the typed assurance result is submitted for the open request with
+`nah lifecycle assurance watch-engine < payload.json` (the hidden lifecycle
+group, not `nah stage complete`, which is specification-only). The request must
+be the one raised after the repairs (`nah harden` invalidates the stale one,
+`nah implement` re-raises it, `nah harden` claims it, all with
+`--profile claude-only`). Evidence findings ride along as non-blocking. After
+archival, commit the `.nah/done/<date>/watch-engine` move. Candidates seen while
+composing the check still stand: Telegram delivery behind `NotifierPort`, the
+Solari-provider switch on `SOLARI_API_KEY` (s9), a `startAfter` back-off on
+transient retries, and re-exporting `ScheduleOptions` and `ScheduleRecord` from
+the db index.
 
-- `watch-domain-model` "missing proof domain-red" and `browser-tier-fetcher`
-  "missing proof ladder-unit": both receipts are in events.jsonl
-  (04:43:13Z and 05:24:14Z), but their verification keys no longer match
-  the proof rows as declared now (the domain-red claim on the row was
-  reworded after its receipt). A red proof cannot be honestly rerun after
-  the implementation exists; the green `ladder-unit` can be. `nah verify`
-  refuses outside a running implementation attempt, so the rerun is
-  hardening's first move.
-- `config-unit` covered file `packages/api/src/errors.ts` changed after
-  verification: a sibling sprint's committed edit. Rerun in hardening.
-
-Candidates seen while composing the check: Telegram delivery behind
-`NotifierPort` (the log notifier is the stand-in), the Solari-provider switch
-in `scripts/worker.mjs` when `SOLARI_API_KEY` is set (s9's), a `startAfter`
-back-off on transient retries instead of the harness's flat delay, and
-re-exporting `ScheduleOptions` and `ScheduleRecord` from the db index now
-that action-playbooks has committed. Resume with `nah harden s2`.
-
-<!-- nah-checkpoint:fff8600ac6cbbdcf -->
 ## 2026-09-02T04:29:42.763Z · claude-code · 45ae039f-e00e-4e13-948f-ad5b68b5d597
 
 - Stage: implementation
@@ -494,3 +692,45 @@ that action-playbooks has committed. Resume with `nah harden s2`.
 - Assurance request: none
 - Knowledge revisions: none
 - Resume: `nah implement s2`
+
+<!-- nah-checkpoint:1194027a9cde3259 -->
+## 2026-09-02T13:24:45.410Z · claude-code · 45ae039f-e00e-4e13-948f-ad5b68b5d597
+
+- Stage: hardening
+- Ready: none
+- In progress: none
+- Root blockers: none
+- Done: 8/8
+- Receipts: verification-completed-eventf9a030e762234679a776c654106dfae3, verification-completed-event9789e824d76a428f95c53217a9e16498, verification-completed-eventa31574399605441297b7932a68f714a6, verification-completed-event4862e20c2d65403784f01fb1581052fc, verification-completed-event9296d41a180d4d1ab38bc60ed0d74bf1, verification-completed-eventee43ee96fea44771b590aae16c8a5405, verification-completed-event5851a88014b14e0381d254f991e4713e, verification-completed-event3cdbf761791042d19205518255da8b1c, verification-completed-eventf88cd9fa46d848b6a183a7cd681a5a06, verification-completed-event9aa370d17c994e09abed93c672142746, verification-completed-event82fa9d3e205c436e93134efc71500850, verification-completed-event6562d387b11b4facac2af0f55222312a, verification-completed-event40029118929341208d23fc430855f128, verification-completed-event43fc401ec7d6462ca9721964f5742d61, verification-completed-event201617ba2fba4b0c847a346ffbf20c38, verification-completed-event152d2fe9d2174cb7a0381bd8f77a4ed8, verification-completed-event2d52353665d74b43b804c964a32939c5, verification-completed-evente553c3cf5035418a82867e7880a85e6e, verification-completed-event8562476acb784b07bc08018ebd0c8b67, verification-completed-event3c9e772ec5e0412ba10ea209a183e165, verification-completed-event979076571d5540f08dbc6e31eb2daaee, verification-completed-event622d9e6951134e4199e74bf3420f0f7d, verification-completed-event31eb3c3649214c4caa72db83bc8cab15, verification-completed-event2fd764a2f5b1400ca06f1a1770a712ff, verification-completed-event64be7191d6a944d781b11d6d8b26e60f, verification-completed-eventd513beab23db4d65bd9197efd7e964ec, verification-completed-event9bcd14579d804535b8d3729aa0bf0334, verification-completed-event54a0bbf58c0945c29d892b052957f221, verification-completed-eventa06f61c0be1941be8547bc0783e9032a, verification-completed-event67e5c4facb8d479aaa40c07cf9496472, verification-completed-event2e450e18e4624b28997686186e192e2a, verification-completed-event5727719815154396916f6c8e0a80e1df, verification-completed-event8aecd4628fa04f8eb3a520bbaac36651, verification-completed-event2fa58b9d7d33404eab433ad78b7465d3, verification-completed-event764935a0a6f8411599f980fa893452cc, verification-completed-event2a748d0fb4de45378812f7742ad36ee8, verification-completed-event4a6d11941bb940c3ad235e39e69011f6, verification-completed-eventd8d7d0a801cb4bdeb3deb3a031c2b94b, verification-completed-event24f5a883ab264682a71e159d5212be61, verification-completed-event6c9c7e7824004ce38fd8690b0fd93d2f, verification-completed-event76105353ae174401a381118e161aebf1, verification-completed-event7818e02df0994740925c978c241e33b5, verification-completed-evente12964be4b4542048eda64908052d90d
+- Findings: none
+- Assurance request: hardening:hardening-h87ef3527fe6a88ab
+- Knowledge revisions: none
+- Resume: `nah harden s2`
+
+<!-- nah-checkpoint:67ab0349e75f4300 -->
+## 2026-09-02T13:38:57.969Z · claude-code · 45ae039f-e00e-4e13-948f-ad5b68b5d597
+
+- Stage: hardening
+- Ready: harden-parked-reason-stable
+- In progress: none
+- Root blockers: none
+- Done: 8/9
+- Receipts: verification-completed-eventf9a030e762234679a776c654106dfae3, verification-completed-event9789e824d76a428f95c53217a9e16498, verification-completed-eventa31574399605441297b7932a68f714a6, verification-completed-event4862e20c2d65403784f01fb1581052fc, verification-completed-event9296d41a180d4d1ab38bc60ed0d74bf1, verification-completed-eventee43ee96fea44771b590aae16c8a5405, verification-completed-event5851a88014b14e0381d254f991e4713e, verification-completed-event3cdbf761791042d19205518255da8b1c, verification-completed-eventf88cd9fa46d848b6a183a7cd681a5a06, verification-completed-event9aa370d17c994e09abed93c672142746, verification-completed-event82fa9d3e205c436e93134efc71500850, verification-completed-event6562d387b11b4facac2af0f55222312a, verification-completed-event40029118929341208d23fc430855f128, verification-completed-event43fc401ec7d6462ca9721964f5742d61, verification-completed-event201617ba2fba4b0c847a346ffbf20c38, verification-completed-event152d2fe9d2174cb7a0381bd8f77a4ed8, verification-completed-event2d52353665d74b43b804c964a32939c5, verification-completed-evente553c3cf5035418a82867e7880a85e6e, verification-completed-event8562476acb784b07bc08018ebd0c8b67, verification-completed-event3c9e772ec5e0412ba10ea209a183e165, verification-completed-event979076571d5540f08dbc6e31eb2daaee, verification-completed-event622d9e6951134e4199e74bf3420f0f7d, verification-completed-event31eb3c3649214c4caa72db83bc8cab15, verification-completed-event2fd764a2f5b1400ca06f1a1770a712ff, verification-completed-event64be7191d6a944d781b11d6d8b26e60f, verification-completed-eventd513beab23db4d65bd9197efd7e964ec, verification-completed-event9bcd14579d804535b8d3729aa0bf0334, verification-completed-event54a0bbf58c0945c29d892b052957f221, verification-completed-eventa06f61c0be1941be8547bc0783e9032a, verification-completed-event67e5c4facb8d479aaa40c07cf9496472, verification-completed-event2e450e18e4624b28997686186e192e2a, verification-completed-event5727719815154396916f6c8e0a80e1df, verification-completed-event8aecd4628fa04f8eb3a520bbaac36651, verification-completed-event2fa58b9d7d33404eab433ad78b7465d3, verification-completed-event764935a0a6f8411599f980fa893452cc, verification-completed-event2a748d0fb4de45378812f7742ad36ee8, verification-completed-event4a6d11941bb940c3ad235e39e69011f6, verification-completed-eventd8d7d0a801cb4bdeb3deb3a031c2b94b, verification-completed-event24f5a883ab264682a71e159d5212be61, verification-completed-event6c9c7e7824004ce38fd8690b0fd93d2f, verification-completed-event76105353ae174401a381118e161aebf1, verification-completed-event7818e02df0994740925c978c241e33b5, verification-completed-evente12964be4b4542048eda64908052d90d
+- Findings: none
+- Assurance request: hardening:hardening-h87ef3527fe6a88ab
+- Knowledge revisions: none
+- Resume: `nah harden s2`
+
+<!-- nah-checkpoint:8b39a7d8131a944d -->
+## 2026-09-02T15:25:22.308Z · claude-code · 45ae039f-e00e-4e13-948f-ad5b68b5d597
+
+- Stage: hardening
+- Ready: none
+- In progress: none
+- Root blockers: none
+- Done: 10/10
+- Receipts: verification-completed-eventf9a030e762234679a776c654106dfae3, verification-completed-event9789e824d76a428f95c53217a9e16498, verification-completed-eventa31574399605441297b7932a68f714a6, verification-completed-event4862e20c2d65403784f01fb1581052fc, verification-completed-event9296d41a180d4d1ab38bc60ed0d74bf1, verification-completed-eventee43ee96fea44771b590aae16c8a5405, verification-completed-event5851a88014b14e0381d254f991e4713e, verification-completed-event3cdbf761791042d19205518255da8b1c, verification-completed-eventf88cd9fa46d848b6a183a7cd681a5a06, verification-completed-event9aa370d17c994e09abed93c672142746, verification-completed-event82fa9d3e205c436e93134efc71500850, verification-completed-event6562d387b11b4facac2af0f55222312a, verification-completed-event40029118929341208d23fc430855f128, verification-completed-event43fc401ec7d6462ca9721964f5742d61, verification-completed-event201617ba2fba4b0c847a346ffbf20c38, verification-completed-event152d2fe9d2174cb7a0381bd8f77a4ed8, verification-completed-event2d52353665d74b43b804c964a32939c5, verification-completed-evente553c3cf5035418a82867e7880a85e6e, verification-completed-event8562476acb784b07bc08018ebd0c8b67, verification-completed-event3c9e772ec5e0412ba10ea209a183e165, verification-completed-event979076571d5540f08dbc6e31eb2daaee, verification-completed-event622d9e6951134e4199e74bf3420f0f7d, verification-completed-event31eb3c3649214c4caa72db83bc8cab15, verification-completed-event2fd764a2f5b1400ca06f1a1770a712ff, verification-completed-event64be7191d6a944d781b11d6d8b26e60f, verification-completed-eventd513beab23db4d65bd9197efd7e964ec, verification-completed-event9bcd14579d804535b8d3729aa0bf0334, verification-completed-event54a0bbf58c0945c29d892b052957f221, verification-completed-eventa06f61c0be1941be8547bc0783e9032a, verification-completed-event67e5c4facb8d479aaa40c07cf9496472, verification-completed-event2e450e18e4624b28997686186e192e2a, verification-completed-event5727719815154396916f6c8e0a80e1df, verification-completed-event8aecd4628fa04f8eb3a520bbaac36651, verification-completed-event2fa58b9d7d33404eab433ad78b7465d3, verification-completed-event764935a0a6f8411599f980fa893452cc, verification-completed-event2a748d0fb4de45378812f7742ad36ee8, verification-completed-event4a6d11941bb940c3ad235e39e69011f6, verification-completed-eventd8d7d0a801cb4bdeb3deb3a031c2b94b, verification-completed-event24f5a883ab264682a71e159d5212be61, verification-completed-event6c9c7e7824004ce38fd8690b0fd93d2f, verification-completed-event76105353ae174401a381118e161aebf1, verification-completed-event7818e02df0994740925c978c241e33b5, verification-completed-evente12964be4b4542048eda64908052d90d, verification-completed-eventa9f842c422b949258296eec5339eb511, verification-completed-event99a39d4bb661423dbf44c9d8a85bf2be, verification-completed-evente76642e909264d09adc86ce325750b1e, verification-completed-eventad3b36352fd44edc87fd9d4f87083746, verification-completed-event56c779d6b3444a8d85c3c22634d961b6, verification-completed-event049b26d5881e4ddfae60b6ba44f2ab78, verification-completed-event63c60db6046f46ff8b17d3ba80589945, verification-completed-eventb8d145e108ee489a864ae0672fcdd844, verification-completed-event71f4f74b75b24751aea6f13ccc397ddc, verification-completed-event572a9ba9f8ce4de0827412c05fa688d6
+- Findings: none
+- Assurance request: hardening:hardening-h87ef3527fe6a88ab
+- Knowledge revisions: none
+- Resume: `nah harden s2`
