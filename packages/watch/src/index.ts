@@ -15,4 +15,17 @@ export {
   type WatchFetchSubject,
   type WatchFetchTarget,
 } from './fetch/ladder.js';
+export {
+  WATCH_CHECK_QUEUE,
+  WATCH_RECONCILE_CRON,
+  WATCH_RECONCILE_QUEUE,
+  reconcileWatchSchedules,
+  registerWatchScheduler,
+  runWatchCheckJob,
+  type ReconcileReport,
+  type TickOutcome,
+  type WatchCheck,
+  type WatchCheckJob,
+  type WatchSchedulerOptions,
+} from './scheduler.js';
 export { createDrizzleWatchStore } from './store.js';

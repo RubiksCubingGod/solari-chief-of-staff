@@ -113,8 +113,10 @@ Every watch of yours, ordered by id. `200` with an array of rows.
 ### `PATCH /watches/:id`
 
 Body `{ "status": "paused" }` or `{ "status": "active" }`. Pausing stops the
-checks; resuming schedules them again. `200` with the row, `404 not_found` for a
-watch that is not yours.
+checks; resuming schedules them again. The worker follows the row within a
+minute, and a tick that was already queued for a paused watch is turned away
+when it comes up, so no check runs after a pause. `200` with the row,
+`404 not_found` for a watch that is not yours.
 
 ### `POST /watches/:id/tier-reset`
 

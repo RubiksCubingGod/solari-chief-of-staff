@@ -129,6 +129,46 @@ describe('the pg-boss job harness', () => {
 });
 
 /**
+ * One queue, many schedules: a watch engine has a cron per watch, and pausing
+ * one watch must not touch the others'. The key is what tells them apart.
+ */
+describe('keyed schedules', () => {
+  it('keeps one schedule per key, replaces by key, and removes one without touching the rest', async () => {
+    const instance = await harness();
+    const queue = queueName('keyed');
+    const byKey = async () =>
+      (await instance.schedules(queue)).sort((left, right) => left.key.localeCompare(right.key));
+
+    await instance.schedule(queue, '*/15 * * * *', { watchId: 'a' }, { key: 'a' });
+    await instance.schedule(queue, '*/30 * * * *', { watchId: 'b' }, { key: 'b' });
+    await instance.schedule(queue, '0 * * * *');
+
+    expect(await byKey()).toEqual([
+      { queue, key: '', cron: '0 * * * *', payload: {} },
+      { queue, key: 'a', cron: '*/15 * * * *', payload: { watchId: 'a' } },
+      { queue, key: 'b', cron: '*/30 * * * *', payload: { watchId: 'b' } },
+    ]);
+
+    await instance.schedule(queue, '*/20 * * * *', { watchId: 'a' }, { key: 'a' });
+    expect((await byKey()).map((record) => record.cron)).toEqual(['0 * * * *', '*/20 * * * *', '*/30 * * * *']);
+
+    await instance.unschedule(queue, 'a');
+    expect((await byKey()).map((record) => record.key)).toEqual(['', 'b']);
+
+    await instance.unschedule(queue);
+    expect((await byKey()).map((record) => record.key)).toEqual(['b']);
+
+    // Removing what is not there is not an error.
+    await expect(instance.unschedule(queue, 'a')).resolves.toBeUndefined();
+  });
+
+  it('has nothing to report for a queue nobody has scheduled', async () => {
+    const instance = await harness();
+    expect(await instance.schedules(queueName('unscheduled'))).toEqual([]);
+  });
+});
+
+/**
  * A watch check that is halfway through a browser session must not be failed
  * just because the worker is being replaced: pg-boss hands a failed-in-flight
  * job to the next process, which runs the same side effect a second time.
