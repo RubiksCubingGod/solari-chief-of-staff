@@ -20,18 +20,31 @@ export interface Comparison {
   readonly reason: string;
 }
 
-/** Whether a price is on the far side of the condition's threshold(s). */
-export function priceSatisfies(condition: PriceCondition, value: PriceValue): boolean {
-  const below = condition.drops_below !== null && value.amount < condition.drops_below;
-  const above = condition.rises_above !== null && value.amount > condition.rises_above;
-  return below || above;
+/** Which of the condition's bounds a price is past. At most one can be. */
+interface Sides {
+  readonly below: boolean;
+  readonly above: boolean;
 }
 
-function crossingWords(condition: PriceCondition, value: PriceValue): string {
-  if (condition.drops_below !== null && value.amount < condition.drops_below) {
-    return `drops below ${String(condition.drops_below)}`;
-  }
-  return `rises above ${String(condition.rises_above)}`;
+const NEITHER: Sides = { below: false, above: false };
+
+function sidesOf(condition: PriceCondition, value: PriceValue): Sides {
+  return {
+    below: condition.drops_below !== null && value.amount < condition.drops_below,
+    above: condition.rises_above !== null && value.amount > condition.rises_above,
+  };
+}
+
+/** Whether a price is on the far side of the condition's threshold(s). */
+export function priceSatisfies(condition: PriceCondition, value: PriceValue): boolean {
+  const sides = sidesOf(condition, value);
+  return sides.below || sides.above;
+}
+
+function crossingWords(condition: PriceCondition, sides: Sides): string {
+  return sides.below
+    ? `drops below ${String(condition.drops_below)}`
+    : `rises above ${String(condition.rises_above)}`;
 }
 
 function comparePrice(
@@ -42,25 +55,28 @@ function comparePrice(
   if (current.kind !== 'price') {
     return { triggered: false, reason: `the extracted value is a ${current.kind}, not a price` };
   }
-  const now = priceSatisfies(condition, current);
+  const now = sidesOf(condition, current);
   // A previous value of another kind is no previous price at all: the watch
   // starts over, as it does on its first observation.
-  const before = previous?.kind === 'price' && priceSatisfies(condition, previous);
+  const before = previous?.kind === 'price' ? sidesOf(condition, previous) : NEITHER;
   const amount = String(current.amount);
-  if (!now) {
+  if (!now.below && !now.above) {
     const bounds = [
       condition.drops_below === null ? [] : [`drop below ${String(condition.drops_below)}`],
       condition.rises_above === null ? [] : [`rise above ${String(condition.rises_above)}`],
     ].flat();
     return { triggered: false, reason: `price ${amount} does not ${bounds.join(' or ')}` };
   }
-  const crossing = crossingWords(condition, current);
-  // Already on the far side last time: the person was told then. "Still" is
-  // the README's never-re-firing-on-the-same-value, and it also covers a
-  // different value on the same side, which is not a new crossing.
-  return before
-    ? { triggered: false, reason: `price ${amount} still ${crossing}` }
-    : { triggered: true, reason: `price ${amount} ${crossing}` };
+  const crossing = crossingWords(condition, now);
+  // Each bound is its own crossing: a price past a bound it was not past last
+  // time is news, even when last time it was past the other one. Already past
+  // this bound last time, the person was told then. "Still" is the README's
+  // never-re-firing-on-the-same-value, and it also covers a different value on
+  // the same side, which is not a new crossing.
+  const crossed = (now.below && !before.below) || (now.above && !before.above);
+  return crossed
+    ? { triggered: true, reason: `price ${amount} ${crossing}` }
+    : { triggered: false, reason: `price ${amount} still ${crossing}` };
 }
 
 function compareChange(previous: WatchValue | null, current: WatchValue): Comparison {

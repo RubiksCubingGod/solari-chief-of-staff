@@ -90,6 +90,28 @@ describe('compare for a price watch', () => {
     });
   });
 
+  it('reports a swing from one bound of a two-sided condition to the other as a new crossing', () => {
+    expect(compare(BETWEEN, price(14), price(21))).toEqual({
+      triggered: true,
+      reason: 'price 21 rises above 20',
+    });
+    expect(compare(BETWEEN, price(21), price(14))).toEqual({
+      triggered: true,
+      reason: 'price 14 drops below 15',
+    });
+  });
+
+  it('stays quiet on the same side of a two-sided condition, naming the bound the price is still past', () => {
+    expect(compare(BETWEEN, price(14), price(13))).toEqual({
+      triggered: false,
+      reason: 'price 13 still drops below 15',
+    });
+    expect(compare(BETWEEN, price(21), price(22))).toEqual({
+      triggered: false,
+      reason: 'price 22 still rises above 20',
+    });
+  });
+
   it('treats a rise threshold symmetrically', () => {
     expect(compare(ABOVE_20, price(19), price(21)).triggered).toBe(true);
     expect(compare(ABOVE_20, price(21), price(22)).triggered).toBe(false);
