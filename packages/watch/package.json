@@ -19,6 +19,7 @@
   "dependencies": {
     "@chief-of-staff/core": "workspace:*",
     "@chief-of-staff/db": "workspace:*",
+    "@chief-of-staff/solari": "workspace:*",
     "drizzle-orm": "0.45.2"
   },
   "devDependencies": {
