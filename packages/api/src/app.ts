@@ -4,7 +4,7 @@ import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import { createMailer, type MailerPort } from './auth/mailer.js';
 import { loadAuthConfig, type AuthConfig } from './auth/session.js';
 import { loadConfig, type AppConfig } from './config.js';
-import { declaredErrorCode, errorEnvelope, violationDetails, type ErrorCode } from './errors.js';
+import { HttpError, declaredErrorCode, errorEnvelope, violationDetails, type ErrorCode } from './errors.js';
 import { AJV_FORMATS } from './formats.js';
 import { registerRoutes } from './routes/index.js';
 
@@ -101,7 +101,8 @@ export function createApp(environment: NodeJS.ProcessEnv = process.env): Fastify
     // A refusal a handler raised names its own code; anything Fastify raised is
     // identified by the status it chose.
     const code = declaredErrorCode(error.code) ?? CODE_BY_STATUS[status] ?? 'bad_request';
-    void reply.status(status).send(errorEnvelope(code, error.message));
+    const details = error instanceof HttpError ? error.details : undefined;
+    void reply.status(status).send(errorEnvelope(code, error.message, details));
   });
 
   return app;

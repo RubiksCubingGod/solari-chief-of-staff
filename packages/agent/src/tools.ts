@@ -131,7 +131,11 @@ export function createChatToolkit(options: ChatToolkitOptions): ChatToolkit {
         schedule: z.string().describe('a five-field cron expression saying how often to check'),
         condition: z
           .record(z.string(), z.unknown())
-          .describe('what makes it worth notifying, e.g. { "drops_below": 2000 } in cents'),
+          .describe(
+            "what makes it worth notifying, in the page's own units: { \"drops_below\": 20 } for a " +
+              "price watch on a $20 threshold (rises_above also works), { \"region\": \"the headline\" } " +
+              'or {} for a change watch',
+          ),
         extractor: z
           .record(z.string(), z.unknown())
           .optional()

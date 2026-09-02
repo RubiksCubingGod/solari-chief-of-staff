@@ -85,6 +85,10 @@ importers:
       fastify:
         specifier: 5.12.1
         version: 5.12.1
+    devDependencies:
+      '@chief-of-staff/watch':
+        specifier: workspace:*
+        version: link:../watch
 
   packages/bot:
     dependencies:
@@ -106,6 +110,9 @@ importers:
       cheerio:
         specifier: 1.2.0
         version: 1.2.0
+      cron-parser:
+        specifier: 5.10.0
+        version: 5.10.0
 
   packages/db:
     dependencies:

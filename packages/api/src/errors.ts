@@ -67,12 +67,20 @@ export function violationDetails(violations: readonly SchemaViolation[]): ErrorD
 export class HttpError extends Error {
   readonly statusCode: number;
   readonly code: ErrorCode;
+  /**
+   * Per-field refusals, for a handler that judged a body JSON Schema had
+   * already accepted: the shape was right, the meaning was not. They travel in
+   * the envelope's `details` exactly as schema violations do, so a client
+   * fixing a form does not have to know which layer refused it.
+   */
+  readonly details: readonly ErrorDetail[] | undefined;
 
-  constructor(statusCode: number, code: ErrorCode, message: string) {
+  constructor(statusCode: number, code: ErrorCode, message: string, details?: readonly ErrorDetail[]) {
     super(message);
     this.name = 'HttpError';
     this.statusCode = statusCode;
     this.code = code;
+    this.details = details;
   }
 }
 

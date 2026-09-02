@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createApp } from './app.js';
-import type { ErrorEnvelope } from './errors.js';
+import { HttpError, type ErrorEnvelope } from './errors.js';
 
 const ENVIRONMENT: NodeJS.ProcessEnv = {
   DATABASE_URL: 'postgres://user@localhost:5432/chief_of_staff',
@@ -129,6 +129,26 @@ describe('the api app factory', () => {
 
     expect(response.statusCode).toBe(409);
     expect(response.json()).toEqual({ conflict: true });
+  });
+
+  it('carries the per-field details a handler attached to its own refusal', async () => {
+    const instance = app();
+    instance.get('/probe', () => {
+      throw new HttpError(400, 'validation_failed', 'The probe did not mean anything.', [
+        { path: '/schedule', message: 'runs every 1 minute; the floor is every 5 minutes' },
+      ]);
+    });
+
+    const response = await instance.inject({ method: 'GET', url: '/probe' });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json<ErrorEnvelope>()).toEqual({
+      error: {
+        code: 'validation_failed',
+        message: 'The probe did not mean anything.',
+        details: [{ path: '/schedule', message: 'runs every 1 minute; the floor is every 5 minutes' }],
+      },
+    });
   });
 
   it('maps an unmapped 4xx a route threw to the generic bad_request code', async () => {

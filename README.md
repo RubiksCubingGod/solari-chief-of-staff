@@ -7,7 +7,7 @@ and cancellations carried out in a real browser.
 
 This repository is the substrate the engines land on: the workspace, the
 Postgres data model, the job harness, and the HTTP surface. `docs/ARCHITECTURE.md`
-is the design it implements.
+is the design it implements; `docs/API.md` is the HTTP surface as a client sees it.
 
 ## Requirements
 
