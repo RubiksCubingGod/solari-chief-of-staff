@@ -26,6 +26,14 @@ const DIST_DIR_VARIABLE = 'NEXT_DIST_DIR';
  */
 export interface WebDevServer {
   readonly url: string;
+  /**
+   * The build directory this instance was given, absolute.
+   *
+   * Exposed so that what makes an instance safe to throw away is assertable
+   * rather than trusted by inspection - the same reason `vitest.config.ts`
+   * exports the coverage glob its own gate is checked against.
+   */
+  readonly buildDirectory: string;
   stop(): Promise<void>;
 }
 
@@ -128,7 +136,7 @@ export async function startWebDevServer(
     void handle(request, response);
   });
 
-  return { url, stop };
+  return { url, buildDirectory: join(APPLICATION_DIRECTORY, buildDirectory), stop };
 }
 
 function listen(server: Server, host: string, port: number): Promise<void> {
