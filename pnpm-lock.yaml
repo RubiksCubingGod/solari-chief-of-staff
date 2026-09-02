@@ -142,7 +142,24 @@ importers:
         specifier: 17.10.0-beta.17
         version: 17.10.0-beta.17
 
-  packages/playbooks: {}
+  packages/playbooks:
+    dependencies:
+      '@chief-of-staff/core':
+        specifier: workspace:*
+        version: link:../core
+      '@chief-of-staff/db':
+        specifier: workspace:*
+        version: link:../db
+      '@chief-of-staff/solari':
+        specifier: workspace:*
+        version: link:../solari
+      playwright:
+        specifier: 1.62.1
+        version: 1.62.1
+    devDependencies:
+      '@chief-of-staff/fixtures':
+        specifier: workspace:*
+        version: link:../../fixtures
 
   packages/solari:
     dependencies:

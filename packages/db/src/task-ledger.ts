@@ -6,6 +6,7 @@ import {
   type AskUserEventPayload,
   type RejectedEventPayload,
   type RejectionReason,
+  type StepEventPayload,
   type TaskEventType,
   type TaskStatus,
   type TransitionCause,
@@ -487,4 +488,42 @@ export function orphanTask(
     await moveWithin(tx, task, 'orphaned', { jobId, jobState });
     return true;
   });
+}
+
+/** Which browser session a run used, and whether the provider recorded it. */
+export interface BrowserSessionRecord {
+  readonly provider: string;
+  readonly sessionId: string;
+  /** What the provider echoed. `false` is an honest absence - the local provider never records - not an error. */
+  readonly recording: boolean;
+  readonly recordingUrl?: string;
+}
+
+/**
+ * Puts the session on the task's row - the columns the dashboard's replay
+ * reads - and a `step` on the trail, so the timeline says which session ran
+ * and whether anyone will be able to watch it. Written as soon as a session
+ * is acquired; a later session on the same task replaces the columns and
+ * adds another step.
+ */
+export async function recordBrowserSession(
+  db: TaskDatabase,
+  taskId: string,
+  record: BrowserSessionRecord,
+): Promise<void> {
+  await db
+    .update(tasks)
+    .set({ solariSessionId: record.sessionId, recordingUrl: record.recordingUrl ?? null })
+    .where(eq(tasks.id, taskId));
+  const payload: StepEventPayload = {
+    name: 'browser_session',
+    outcome: record.recording ? 'recorded' : 'unrecorded',
+    detail: {
+      provider: record.provider,
+      sessionId: record.sessionId,
+      recording: record.recording,
+      recordingUrl: record.recordingUrl ?? null,
+    },
+  };
+  await appendWithin(db, taskId, 'step', payload);
 }
