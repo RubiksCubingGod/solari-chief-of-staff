@@ -234,7 +234,7 @@ function describeTarget(kind: WatchKind, hint: string | null): string {
 }
 
 /** A change watch may carry the person's description of the region; nothing else has one. */
-function regionHint(watch: ExtractorSubject): string | null {
+export function regionHint(watch: ExtractorSubject): string | null {
   const condition = parseCondition(watch.kind, watch.condition);
   return condition?.kind === 'change' ? condition.region : null;
 }

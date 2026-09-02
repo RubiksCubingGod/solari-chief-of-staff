@@ -36,6 +36,7 @@ export {
   createExtractorCreator,
   describeCreationFailure,
   provisionExtractor,
+  regionHint,
   type ExtractorCreation,
   type ExtractorCreator,
   type ExtractorCreatorOptions,
@@ -43,6 +44,15 @@ export {
   type ExtractorRequest,
   type ExtractorSubject,
 } from './extractor.js';
+export {
+  EXTRACTION_ROUTES,
+  degradedDedupKey,
+  extractWatchValue,
+  type Extraction,
+  type ExtractionPorts,
+  type ExtractionRoute,
+  type ExtractionSubject,
+} from './healing.js';
 export {
   ANTHROPIC_KEY_VARIABLE,
   LIVE_LLM_FLAG,
