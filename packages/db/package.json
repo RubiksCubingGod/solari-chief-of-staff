@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Drizzle schema, migrations, the shared Postgres client, and the pg-boss job harness.",
+  "description": "Drizzle schema, migrations, the shared Postgres client, the pg-boss job harness, and the persisted task state machine that rides it.",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

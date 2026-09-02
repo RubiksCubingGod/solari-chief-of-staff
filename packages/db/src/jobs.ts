@@ -50,10 +50,20 @@ export interface JobRecord {
   readonly output: unknown;
 }
 
+export interface EnqueueOptions {
+  /**
+   * Hold the job until this moment. A deadline that lives in the queue survives
+   * the process that set it, which a timer in that process would not.
+   */
+  readonly startAfter?: Date;
+}
+
 export interface JobHarness {
+  /** The pg-boss schema this harness's queues live in. */
+  readonly schema: string;
   start(): Promise<void>;
   register<TPayload>(queue: string, handler: JobHandler<TPayload>): Promise<void>;
-  enqueue(queue: string, payload: object): Promise<string>;
+  enqueue(queue: string, payload: object, options?: EnqueueOptions): Promise<string>;
   schedule(queue: string, cron: string, payload?: object): Promise<void>;
   inspect(queue: string, jobId: string): Promise<JobRecord | null>;
   stop(options?: StopOptions): Promise<void>;
@@ -80,9 +90,10 @@ export function createJobHarness(options: JobHarnessOptions): JobHarness {
   const retryPolicy = options.retryPolicy ?? DEFAULT_RETRY_POLICY;
   const pollingIntervalSeconds = options.pollingIntervalSeconds ?? 2;
   const shutdownTimeoutSeconds = options.shutdownTimeoutSeconds ?? DEFAULT_SHUTDOWN_TIMEOUT_SECONDS;
+  const schema = options.schema ?? 'pgboss';
   const boss = new PgBoss({
     connectionString: options.connectionString,
-    schema: options.schema ?? 'pgboss',
+    schema,
     schedule: true,
     // pg-boss caps both at 45s. Ten seconds means a due cron dispatches within
     // ten seconds of its minute and a schedule change is noticed about as fast,
@@ -108,6 +119,8 @@ export function createJobHarness(options: JobHarnessOptions): JobHarness {
   }
 
   return {
+    schema,
+
     async start(): Promise<void> {
       await boss.start();
     },
@@ -121,9 +134,13 @@ export function createJobHarness(options: JobHarnessOptions): JobHarness {
       });
     },
 
-    async enqueue(queue: string, payload: object): Promise<string> {
+    async enqueue(queue: string, payload: object, enqueueOptions?: EnqueueOptions): Promise<string> {
       await ensureQueue(queue);
-      const id = await boss.send(queue, payload);
+      const id = await boss.send(
+        queue,
+        payload,
+        enqueueOptions?.startAfter === undefined ? {} : { startAfter: enqueueOptions.startAfter },
+      );
       if (id === null) {
         // Only a queue policy that refuses duplicates returns no id, and these
         // queues are all standard, so this means the queue was dropped between

@@ -204,6 +204,24 @@ describe('the section 5 schema', () => {
     expect(columns['chat_id']?.notNull).toBe(true);
   });
 
+  it('orders a task trail by a sequence Postgres hands out, and remembers the job that owns a run', () => {
+    const eventColumns = Object.fromEntries(
+      getTableConfig(taskEvents).columns.map((column) => [column.name, column]),
+    );
+    const taskColumns = Object.fromEntries(
+      getTableConfig(tasks).columns.map((column) => [column.name, column]),
+    );
+
+    // Two events written in one transaction share a `ts`; an ask writes two.
+    // The identity column is assigned by the database and never ties, so the
+    // timeline can always say which came first.
+    expect(eventColumns['seq']?.notNull).toBe(true);
+    expect(eventColumns['seq']?.generatedIdentity?.type).toBe('always');
+    // Null until a run is enqueued, which is how the reconcile sweep tells a
+    // task the API created from one a worker is already entitled to.
+    expect(taskColumns['job_id']?.notNull).toBe(false);
+  });
+
   it('addresses a user by an email nobody else can also hold', () => {
     const columns = Object.fromEntries(
       getTableConfig(users).columns.map((column) => [column.name, column]),

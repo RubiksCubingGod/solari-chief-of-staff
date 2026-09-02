@@ -43,6 +43,13 @@
       "when": 1788324672620,
       "tag": "0005_watch_engine_state",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788325135359,
+      "tag": "0006_task_lifecycle",
+      "breakpoints": true
     }
   ]
 }
