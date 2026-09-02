@@ -1,4 +1,13 @@
 export {
+  blockedDedupKey,
+  checkWatch,
+  createWatchCheck,
+  registerWatchEngine,
+  type CheckReport,
+  type WatchCheckPorts,
+  type WatchEngineOptions,
+} from './check.js';
+export {
   DEFAULT_BROWSER_TIMEOUT_MS,
   describeBrowserFailure,
   fetchBrowser,
@@ -28,4 +37,5 @@ export {
   type WatchCheckJob,
   type WatchSchedulerOptions,
 } from './scheduler.js';
+export { createLogNotifier, type LogSink } from './notifier.js';
 export { createDrizzleWatchStore } from './store.js';

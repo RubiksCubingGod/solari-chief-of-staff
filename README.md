@@ -54,13 +54,19 @@ passes here it passes there.
 | `pnpm migrate` | Applies the migration set to `DATABASE_URL`. |
 | `pnpm browsers` | Downloads the pinned Chromium the browser provider drives. |
 | `pnpm start` | Runs the API server on `HOST` and `PORT`. |
-| `pnpm worker` | Runs the job worker pool. |
+| `pnpm worker` | Runs the job worker: checks watches on their schedules and reconciles the schedule set once a minute. |
 | `pnpm clean` | Removes build output. |
 
 `pnpm start` and `pnpm worker` are the two long-running processes: one
 deployable unit runs both against the same Postgres (ARCHITECTURE §2). Each
 prints what it bound or started, and shuts down on `SIGTERM` — finishing the
 request or the job it is already handling before the process exits.
+
+The worker writes extractors through Claude when `ANTHROPIC_API_KEY` is set.
+Without it, watches that already have an extractor are still checked, and a
+watch that needs one is parked with that reason in its row rather than the
+process refusing to start. Every trigger it raises is one JSON line on stdout
+until a delivery channel lands.
 
 To change the schema, edit `packages/db/src/schema.ts`, then run
 `pnpm --filter @chief-of-staff/db generate` to write a new migration, and

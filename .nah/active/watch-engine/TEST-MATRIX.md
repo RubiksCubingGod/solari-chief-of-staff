@@ -6,6 +6,7 @@
 | Active watch ticks; paused stops; delete deregisters; restart-survival tick | watch-check-path | integration | every push |
 | Fakestore price path: mutate → tick → observation → exactly one trigger; dedup on repeat | watch-check-path | integration (fixtures + Testcontainers) | every push |
 | Fakenews change path; fetch-failure observation state | watch-check-path | integration | every push |
+| Down site → tick retried per job policy, one observation per run; failed delivery → retry delivers once; worker boots the engine on a migrated Postgres and stops on SIGTERM | watch-check-path | integration (fixtures + Testcontainers + process smoke) | every push |
 | Block classifier on recorded block/challenge/plain pages | tiered-fetching | unit | every push |
 | blocked mode → tier 1; hard-blocked → escalation-marked tier 2; persisted tier rises; plain stays tier 0 | tiered-fetching | integration (LocalProvider) | every push |
 | Exhausted ladder → blocked verdict + notifier event | tiered-fetching | integration | every push |

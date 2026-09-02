@@ -20,6 +20,7 @@ export {
   type ChatTurn,
   type ChatTurnOutcome,
 } from './chat-agent.js';
+export { createAnthropicClient } from './client.js';
 export {
   createHttpCrudClient,
   type CrudClient,
