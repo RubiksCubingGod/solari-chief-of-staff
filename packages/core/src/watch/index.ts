@@ -4,3 +4,4 @@ export * from './condition.js';
 export * from './comparator.js';
 export * from './notifier.js';
 export * from './store.js';
+export * from './fetch.js';

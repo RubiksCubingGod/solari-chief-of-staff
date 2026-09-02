@@ -18,6 +18,9 @@
       "path": "./packages/agent"
     },
     {
+      "path": "./packages/watch"
+    },
+    {
       "path": "./packages/playbooks"
     },
     {

@@ -37,15 +37,20 @@ export interface ObservationRecord {
   readonly id: string;
   readonly watchId: string;
   readonly checkedAt: Date;
-  readonly tierUsed: FetchTier | null;
+  readonly tierUsed: FetchTier;
   readonly value: WatchValue | null;
   readonly triggered: boolean;
   readonly error: string | null;
 }
 
-/** What one check writes down about itself. Exactly one of `value` and `error` is set. */
+/**
+ * What one check writes down about itself. Exactly one of `value` and
+ * `error` is set. A check that failed before it fetched anything records
+ * the tier it was going to fetch at - the watch's floor - because an
+ * observation is about a check, and every check has a tier.
+ */
 export interface NewObservation {
-  readonly tierUsed: FetchTier | null;
+  readonly tierUsed: FetchTier;
   readonly value: WatchValue | null;
   readonly triggered: boolean;
   readonly error: string | null;
@@ -77,7 +82,7 @@ export function successObservation(
   return { tierUsed, value, triggered, error: null };
 }
 
-export function errorObservation(tierUsed: FetchTier | null, error: string): NewObservation {
+export function errorObservation(tierUsed: FetchTier, error: string): NewObservation {
   return { tierUsed, value: null, triggered: false, error };
 }
 

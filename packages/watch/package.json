@@ -1,0 +1,27 @@
+{
+  "name": "@chief-of-staff/watch",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The watch engine: the fetch tier ladder, the Drizzle watch store, and the scheduled check.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build"
+  },
+  "dependencies": {
+    "@chief-of-staff/core": "workspace:*",
+    "@chief-of-staff/db": "workspace:*",
+    "drizzle-orm": "0.45.2"
+  },
+  "devDependencies": {
+    "@chief-of-staff/fixtures": "workspace:*"
+  }
+}

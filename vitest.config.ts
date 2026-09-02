@@ -8,6 +8,7 @@ const WORKSPACE_PACKAGES = [
   'db',
   'solari',
   'agent',
+  'watch',
   'playbooks',
   'api',
   'bot',

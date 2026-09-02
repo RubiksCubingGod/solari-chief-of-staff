@@ -23,7 +23,6 @@ describe('the observation constructors', () => {
       triggered: false,
       error: 'timed out',
     });
-    expect(errorObservation(null, 'no extractor').tierUsed).toBeNull();
   });
 });
 
