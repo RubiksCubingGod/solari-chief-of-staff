@@ -172,6 +172,9 @@ importers:
 
   packages/watch:
     dependencies:
+      '@chief-of-staff/agent':
+        specifier: workspace:*
+        version: link:../agent
       '@chief-of-staff/core':
         specifier: workspace:*
         version: link:../core
