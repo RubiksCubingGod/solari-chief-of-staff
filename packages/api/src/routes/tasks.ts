@@ -1,11 +1,12 @@
 import { TASK_KINDS, TASK_MODES } from '@chief-of-staff/core';
 import type { TaskKind, TaskMode } from '@chief-of-staff/core';
-import { tasks } from '@chief-of-staff/db';
-import { and, desc, eq } from 'drizzle-orm';
+import { taskEvents, tasks } from '@chief-of-staff/db';
+import { and, asc, desc, eq } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 
 import { callerHeaderSchema, resolveCaller } from '../caller.js';
 import { HttpError } from '../errors.js';
+import { NDJSON_CONTENT_TYPE, RecordingUnavailableError, fetchRecording } from '../recording.js';
 
 /**
  * Creating a task queues it and stops there: the action engine that runs one is
@@ -45,6 +46,31 @@ const taskIdParamsSchema = {
   required: ['id'],
   properties: { id: { type: 'string', format: 'uuid' } },
 } as const;
+
+/** Where a task's recording is served from, for a task that has one. */
+export function recordingPath(id: string): string {
+  return `/tasks/${encodeURIComponent(id)}/recording`;
+}
+
+/**
+ * The caller's task, or the refusal. Scoped by owner as well as id, so a task
+ * belonging to somebody else is answered exactly as a task that never existed.
+ */
+async function ownedTask(
+  app: FastifyInstance,
+  id: string,
+  userId: string,
+): Promise<typeof tasks.$inferSelect> {
+  const [found] = await app.db
+    .select()
+    .from(tasks)
+    .where(and(eq(tasks.id, id), eq(tasks.userId, userId)))
+    .limit(1);
+  if (found === undefined) {
+    throw new HttpError(404, 'not_found', `No task ${id} belongs to you.`);
+  }
+  return found;
+}
 
 export function registerTaskRoutes(app: FastifyInstance): void {
   app.post(
@@ -86,20 +112,63 @@ export function registerTaskRoutes(app: FastifyInstance): void {
       preHandler: resolveCaller,
     },
     async (request: FastifyRequest<{ Params: { id: string } }>) => {
-      const [found] = await app.db
-        .select()
-        .from(tasks)
-        // Scoped by owner as well as id, so a task belonging to somebody else
-        // is answered exactly as a task that never existed.
-        .where(and(eq(tasks.id, request.params.id), eq(tasks.userId, request.userId)))
-        .limit(1);
-      if (found === undefined) {
-        throw new HttpError(404, 'not_found', `No task ${request.params.id} belongs to you.`);
+      const found = await ownedTask(app, request.params.id, request.userId);
+      // Oldest first, by the sequence the ledger assigned as it wrote: the
+      // detail page tells the story in the order it happened, and a timestamp
+      // cannot order two events written inside the same millisecond.
+      const events = await app.db
+        .select({
+          seq: taskEvents.seq,
+          ts: taskEvents.ts,
+          type: taskEvents.type,
+          payload: taskEvents.payload,
+        })
+        .from(taskEvents)
+        .where(eq(taskEvents.taskId, found.id))
+        .orderBy(asc(taskEvents.seq));
+      return {
+        ...found,
+        events,
+        // A reference rather than an address: the page fetches the recording
+        // through the route below, which settles ownership and encoding, and
+        // never has to know where the bytes live or how the store keeps them.
+        recording:
+          found.recordingUrl === null
+            ? { available: false }
+            : { available: true, href: recordingPath(found.id) },
+      };
+    },
+  );
+
+  app.get(
+    '/tasks/:id/recording',
+    {
+      schema: { headers: callerHeaderSchema, params: taskIdParamsSchema },
+      preHandler: resolveCaller,
+    },
+    async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
+      const found = await ownedTask(app, request.params.id, request.userId);
+      if (found.recordingUrl === null) {
+        throw new HttpError(404, 'not_found', `Task ${found.id} has no recording.`);
       }
-      // The row and nothing else: the step timeline and the replay embed that
-      // hang off a task are the action-playbooks sprint's, and joining them in
-      // here would make this read wait on tables the history shell never draws.
-      return found;
+      let recording: string;
+      try {
+        recording = await fetchRecording(found.recordingUrl);
+      } catch (error) {
+        if (!(error instanceof RecordingUnavailableError)) throw error;
+        request.log.warn({ err: error, taskId: found.id }, 'the recording store let a reader down');
+        throw new HttpError(
+          502,
+          'upstream_unavailable',
+          'The recording could not be fetched from its store.',
+        );
+      }
+      // Private and uncached: the body was fetched with the caller's ownership
+      // settled, and a shared cache would hand it to the next caller without.
+      return reply
+        .header('content-type', NDJSON_CONTENT_TYPE)
+        .header('cache-control', 'private, no-store')
+        .send(recording);
     },
   );
 }

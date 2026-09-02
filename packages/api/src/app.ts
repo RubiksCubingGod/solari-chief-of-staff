@@ -89,9 +89,11 @@ export function createApp(environment: NodeJS.ProcessEnv = process.env): Fastify
       return;
     }
     const status = error.statusCode ?? 500;
-    if (status >= 500) {
+    if (status >= 500 && !(error instanceof HttpError)) {
       // The reason stays in the log, where operators can see it, and out of the
-      // response, where a connection string would otherwise end up.
+      // response, where a connection string would otherwise end up. A handler
+      // that raised a 5xx itself - a store it fetched from being away - chose
+      // its own code and its own words, and is answered below as it asked.
       request.log.error({ err: error }, 'request handler failed');
       void reply
         .status(500)

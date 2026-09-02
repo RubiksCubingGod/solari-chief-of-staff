@@ -30,6 +30,10 @@ export const ERROR_CODES = [
   'payload_too_large',
   'unsupported_media_type',
   'internal_error',
+  // Something this server fetches on the caller's behalf - a task's recording,
+  // from its store - refused or did not answer. Distinct from `internal_error`:
+  // nothing here is broken, and a client that retried later might well get it.
+  'upstream_unavailable',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

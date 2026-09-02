@@ -2,6 +2,7 @@ import type {
   CalendarItemKind,
   CalendarItemStatus,
   FetchTier,
+  TaskEventType,
   TaskKind,
   TaskMode,
   TaskStatus,
@@ -79,6 +80,28 @@ export interface Task {
   readonly finishedAt: string | null;
 }
 
+/** One event of a task's trail, as the ledger wrote it. */
+export interface TaskEvent {
+  /** The ledger's own order: ascending is the order things happened. */
+  readonly seq: number;
+  readonly ts: string;
+  readonly type: TaskEventType;
+  /** Shaped by `type`; see `task-lifecycle.ts` in core. Read defensively. */
+  readonly payload: unknown;
+}
+
+/** Whether a task has a recording, and where the API serves it from. */
+export interface RecordingReference {
+  readonly available: boolean;
+  readonly href?: string;
+}
+
+/** One task with everything the detail page draws: the row, its trail, its recording. */
+export interface TaskDetail extends Task {
+  readonly events: readonly TaskEvent[];
+  readonly recording: RecordingReference;
+}
+
 export interface HealthReport {
   readonly status: string;
 }
@@ -104,6 +127,9 @@ export const API_ERROR_CODES = [
   'payload_too_large',
   'unsupported_media_type',
   'internal_error',
+  // The API fetched something on the caller's behalf - a task's recording -
+  // and its store refused or did not answer.
+  'upstream_unavailable',
 ] as const;
 
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
@@ -220,6 +246,10 @@ export interface ApiClient {
   setWatchStatus(id: string, status: WatchStatus): Promise<Watch>;
   listCalendarItems(): Promise<readonly CalendarItem[]>;
   listTasks(): Promise<readonly Task[]>;
+  /** One task with its trail and recording reference; 404 for a stranger's. */
+  getTask(id: string): Promise<TaskDetail>;
+  /** The task's recording as NDJSON text, whatever the store kept it as. */
+  readTaskRecording(id: string): Promise<string>;
 }
 
 function readEnvelope(body: unknown): { code: string; message: string; details: ApiErrorDetail[] } | undefined {
@@ -239,16 +269,30 @@ function readEnvelope(body: unknown): { code: string; message: string; details: 
   };
 }
 
+/** The refusal a response carries, read from its envelope when it has one. */
+async function refusal(response: Response, method: string, path: string): Promise<ApiError> {
+  const envelope = readEnvelope(await response.json().catch(() => undefined));
+  return envelope === undefined
+    ? new ApiError(
+        response.status,
+        UNKNOWN_ERROR_CODE,
+        `${method} ${path} was refused with ${String(response.status)} and no error envelope.`,
+        [],
+      )
+    : new ApiError(response.status, envelope.code, envelope.message, envelope.details);
+}
+
 export function createApiClient(options: ApiClientOptions): ApiClient {
   const baseUrl = options.baseUrl;
   const credential = options.credential ?? anonymousCredential;
   const send = options.fetch ?? ((input, init) => fetch(input, init));
 
-  async function request<T>(
+  async function exchange(
     method: 'GET' | 'POST' | 'PATCH',
     path: string,
+    accept: string,
     body?: unknown,
-  ): Promise<T> {
+  ): Promise<Response> {
     const url = `${baseUrl}${path}`;
     const { headers } = await credential();
     let response: Response;
@@ -256,7 +300,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
       response = await send(url, {
         method,
         headers: {
-          accept: 'application/json',
+          accept,
           ...(body === undefined ? {} : { 'content-type': 'application/json' }),
           ...headers,
         },
@@ -265,20 +309,17 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
     } catch (cause) {
       throw new ApiUnreachableError(url, cause);
     }
+    if (!response.ok) throw await refusal(response, method, path);
+    return response;
+  }
 
-    const payload: unknown = await response.json().catch(() => undefined);
-    if (!response.ok) {
-      const envelope = readEnvelope(payload);
-      throw envelope === undefined
-        ? new ApiError(
-            response.status,
-            UNKNOWN_ERROR_CODE,
-            `${method} ${path} was refused with ${String(response.status)} and no error envelope.`,
-            [],
-          )
-        : new ApiError(response.status, envelope.code, envelope.message, envelope.details);
-    }
-    return payload as T;
+  async function request<T>(
+    method: 'GET' | 'POST' | 'PATCH',
+    path: string,
+    body?: unknown,
+  ): Promise<T> {
+    const response = await exchange(method, path, 'application/json', body);
+    return (await response.json().catch(() => undefined)) as T;
   }
 
   return {
@@ -297,5 +338,14 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
       request<Watch>('PATCH', `/watches/${encodeURIComponent(id)}`, { status }),
     listCalendarItems: () => request<readonly CalendarItem[]>('GET', '/calendar-items'),
     listTasks: () => request<readonly Task[]>('GET', '/tasks'),
+    getTask: (id) => request<TaskDetail>('GET', `/tasks/${encodeURIComponent(id)}`),
+    readTaskRecording: async (id) => {
+      const response = await exchange(
+        'GET',
+        `/tasks/${encodeURIComponent(id)}/recording`,
+        'application/x-ndjson',
+      );
+      return response.text();
+    },
   };
 }

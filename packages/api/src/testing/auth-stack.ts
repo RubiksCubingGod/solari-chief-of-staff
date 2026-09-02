@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 import type {
   CalendarItemKind,
   CalendarItemStatus,
+  TaskEventType,
   TaskKind,
   TaskMode,
   TaskStatus,
@@ -13,6 +14,7 @@ import {
   calendarItems,
   observations,
   runMigrations,
+  taskEvents,
   tasks,
   users,
   watches,
@@ -112,6 +114,22 @@ export interface SeedTask {
   readonly status?: TaskStatus;
   readonly mode?: TaskMode;
   readonly input?: unknown;
+  /** Where the task's recording is, for a task that has one. */
+  readonly recordingUrl?: string;
+  /** ISO; a task that has not finished has none. */
+  readonly finishedAt?: string;
+  /**
+   * The task's trail, oldest first. Each event is written after the one before
+   * it, so the sequence the ledger assigns follows the array, and a page that
+   * shows them in any other order is distinguishable from one that does not.
+   */
+  readonly events?: readonly SeedTaskEvent[];
+}
+
+/** One event of a task's trail, as the engine would have written it. */
+export interface SeedTaskEvent {
+  readonly type: TaskEventType;
+  readonly payload: unknown;
 }
 
 /** One planted task, as the test now knows it. */
@@ -390,9 +408,23 @@ async function seedAccountOn(
         status,
         mode,
         createdAt,
+        recordingUrl: seed.recordingUrl ?? null,
+        finishedAt: seed.finishedAt === undefined ? null : new Date(seed.finishedAt),
       })
       .returning({ id: tasks.id });
     if (row === undefined) throw new Error(`the task at position ${String(index)} was not created`);
+
+    for (const [position, event] of (seed.events ?? []).entries()) {
+      // One insert per event, so the identity column hands out sequence
+      // numbers in array order; the timestamps are anchored a second apart
+      // for the same reason the rows are a minute apart.
+      await app.db.insert(taskEvents).values({
+        taskId: row.id,
+        type: event.type,
+        payload: event.payload,
+        ts: new Date(createdAt.getTime() + (position + 1) * 1000),
+      });
+    }
 
     plantedTasks.push({ id: row.id, kind, status, mode, createdAt: createdAt.toISOString() });
   }

@@ -22,6 +22,8 @@ export function stubClient(overrides: Partial<ApiClient>): ApiClient {
     setWatchStatus: unexpected('setWatchStatus'),
     listCalendarItems: unexpected('listCalendarItems'),
     listTasks: unexpected('listTasks'),
+    getTask: unexpected('getTask'),
+    readTaskRecording: unexpected('readTaskRecording'),
     ...overrides,
   };
 }

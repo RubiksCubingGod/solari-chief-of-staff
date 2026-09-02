@@ -1,5 +1,92 @@
 # Handoff
 
+## 2026-09-02 · implementation · replay-embed-page
+
+### Where the frontier is
+
+- `guardrails` done at `a4c6123`.
+- `replay-embed-page` implemented and proven (API integration 7/7, browser e2e 6/6, unit suites 47/47, lint clean, typecheck clean); closing with `nah task finish`.
+- Next ready: `playbook-runner` (needs `userio-gate` and `guardrails`, both done), then `fakegym-cancellation`.
+
+### What landed
+
+- API: `GET /tasks/:id` now answers the row with `events` (oldest first by the ledger's `seq`; each `{seq, ts, type, payload}`) and `recording: {available, href?}`. New `GET /tasks/:id/recording` fetches the store's body server-side and answers plain NDJSON (`application/x-ndjson`, `cache-control: private, no-store`): 404 `not_found` for a stranger's task, an unknown id, or a task without a recording; 502 `upstream_unavailable` (new code, mirrored in the web client) when the store refuses, does not answer, or hands back bytes that do not inflate. `packages/api/src/recording.ts` sniffs gzip by its magic bytes and fetches with a 15 s timeout; it never puts the store's URL in a message.
+- Test seam: `seedAccount` tasks accept `recordingUrl`, `finishedAt` and `events` (inserted one at a time so `seq` follows the array).
+- Web: `api-client.ts` gains `getTask` and `readTaskRecording` (with `TaskDetail`, `TaskEvent`, `RecordingReference`); `tasks/detail-view-model.ts` (a headline per event type, malformed payloads shown as themselves, the pending question of a `waiting_user` task, the dashboard-local recording href); `tasks/recording-events.ts` (NDJSON parser and the sentence for each way a replay fails); `tasks/replay-player.tsx` (the dashboard's one client component: fetches from the page's own route, loads `rrweb-player@2.1.1` on demand, autoplays with the controller, `role="alert"` on failure); `app/tasks/[id]/page.tsx` (facts, `role="status"` pending question, replay section with the explicit absence sentence, `ol[aria-label="Timeline"]`, `notFound()` on a 404); `app/tasks/[id]/recording/route.ts` (same-origin proxy forwarding the cookie; every exit a status, never a throw).
+- Fixture: `packages/web/src/testing/fake-gym-cancellation.ndjson`, a real rrweb 2.1.1 capture (12 events, 1.3 s) of a fake gym page being cancelled, made once in Chromium; `testing/recording-server.ts` serves it plain, gzip-encoded, as raw gzip bytes, corrupt, and missing.
+- `packages/web/package.json`: `rrweb-player@2.1.1` (dependency), `@rrweb/types@2.1.1` (dev, types only).
+
+### Assumptions recorded (low-risk, reversible)
+
+- **The API proxies the recording; the browser never learns the store.** A recording URL may be presigned. The page fetches its own `/tasks/{id}/recording`, which fetches the API's, which settles ownership; the API's `href` is informational.
+- **Gzip is judged by bytes, not headers.** The browser-substrate live smoke found the store serving `content-encoding: gzip` (which undici inflates) and raw gzip bytes to clients that do not; the API looks for `1f 8b` and inflates either way. That finding is consumed here, as the spec asked.
+- **A new error code.** `upstream_unavailable` (502) joins `ERROR_CODES` and `API_ERROR_CODES`; both parity suites pass. `internal_error` would have said the server was broken when it is the store that is away.
+- **`recordingUrl` stays on the detail response** because the s4 contract test pins it (`toMatchObject` with `recordingUrl: null`); the dashboard never renders it. Dropping it from both task reads is a contract change for hardening, not this task.
+- **Headline wording belongs to the view model:** `from → to (cause)`, `name: outcome`, `Asked: …`, `Replied: …`, `Refused attempted while status: reason`. An event whose payload is not the declared shape is shown under its type with the raw payload as detail rather than dropped.
+- **The pending question** is the last `ask_user` after the last `user_reply`, shown only while the status is `waiting_user`.
+- **The recording is fetched by the player, not inlined**, so a fetch that fails is an alert beside a timeline that still renders; loading is a sentence.
+- **Scrubbing is proven through the replayed DOM:** the e2e clicks the rrweb-player progress bar at 2 % and at 98 % and reads the page inside the player's iframe (`Membership: active` comes back, then `Cancellation confirmed.` again).
+- **SSRF posture.** `recording_url` is written only by the engine from a provider's answer (`recordBrowserSession`), never by a caller; the recording route fetches whatever the row says. For hardening: pin the store hosts when a second provider appears.
+
+### Findings
+
+- The first GREEN round failed three ways, all of them implementation feedback rather than test defects: (1) the API answered 500 for the store failure because the app error handler collapsed every 5xx to `internal_error`; it now keeps the code and words of an `HttpError` a handler raised itself (`packages/api/src/app.ts`, `app.test.ts` unchanged and green). (2) `getByRole('alert')` in the dev server's page also matches the empty live region of the Next dev overlay (shadow DOM is pierced), so the failure alerts are located with `hasText: /recording/`. (3) The scrub clicked `page.mouse` at the progress bar's bounding box, which sits below the 720 px viewport under the facts and the 540 px frame; the click now goes through the locator, which scrolls the bar into view first. A standalone probe of `rrweb-player` (autoplay to the end, click at 2 %, click at 98 %) established the expected DOM states before the fix.
+- The e2e RED failed in 26 s at the dashboard's 404 (`expected 404 to be 200`), as declared; the API suite failed on the missing `events`/`recording` fields and the missing route.
+- Sibling uncommitted work sat in the tree during RED and GREEN (`packages/agent/*`, `packages/watch/*`, `scripts/worker.mjs`, `tests/process-entry-points.integration.test.ts`, `.env.example`, `README.md`); none of it was touched. Both siblings committed before the gate (`2a6462f` dashboard-read, `a82c91f` watch-engine), so only their NAH ledgers remain uncommitted and are left alone.
+- `.tsx` files are outside the coverage include (`packages/*/src/**/*.ts`), so the page and the player are proven by the browser only; the route handler is `.ts` and has its own unit suite.
+
+### Receipts
+
+- RED: `node scripts/vitest.mjs run --project integration packages/web/src/task-detail-page.integration.test.ts packages/api/src/task-detail.integration.test.ts` → exit 1, 11 failed / 2 passed, `expected 404 to be 200` (attributed `replay-red`).
+- GREEN: same command → exit 0, 13 passed (API 7, browser 6), attributed `replay-green` after one `--retry`. Rules: the five unit suites → 47 passed (attributed `replay-rules`). Gate: `node scripts/check.mjs` → see the ledger receipt.
+
+### Resume
+
+`nah implement s5`
+
+## 2026-09-02 · implementation · guardrails
+
+### Where the frontier is
+
+- `userio-gate` done at `7d622e4`; its gate receipt was re-recorded green after the coverage `.tmp` collision.
+- `guardrails` implemented and proven (unit 50/50, integration 8/8, lint clean, typecheck clean outside the watch sibling's files); closing with `nah task finish`.
+- Next ready: `replay-embed-page` (independent of the browser work); then `playbook-runner` (needs `userio-gate` + `guardrails`), then `fakegym-cancellation`.
+
+### What landed
+
+- `packages/playbooks/src/guardrails/allowlist.ts`: `checkUrl(url, allowlist)` - a host matches exactly or as a subdomain, case- and trailing-dot-insensitive; `about:`/`data:`/`blob:` pass, only http(s) is judged, any other scheme refuses.
+- `packages/playbooks/src/guardrails/payment-detector.ts`: `detectPaymentPage(snapshot)` and `detectPaymentSubmission(submission)` over a small vocabulary (card autocomplete and field names, Luhn-valid card values, security codes, expiry, payment verbs, amounts, checkout markers and paths, processor frame hosts); `parseSubmission(url, method, contentType, body)` reads urlencoded, JSON (flattened to dotted paths), multipart and text bodies; `describePaymentEvidence` writes the evidence for a person.
+- `packages/playbooks/src/guardrails/snapshot.ts`: `SNAPSHOT_SCRIPT` (runs in the page: forms, fields, labels, submit labels, iframe hosts, visible text) and `snapshotPage(page)`.
+- `packages/playbooks/src/guardrails/guardrails.ts`: `installGuardrails(context, policy)` routes every request of the context; `judgeRequest` (pure) applies the allowlist to top-level navigations and the payment gate to mutating requests, fingerprinting a submission by method, origin, path and sorted field names; `runGuarded` and `guardedSession` race the mission body against the first stop and release the session under it; `guardedRequest` forces recording; `paymentQuestion` and `paymentConfirmations` carry the gate through the task's answers; `stopOutcome` maps a stop to `failed` by `violation` or to `ask`.
+- `packages/db/src/task-ledger.ts`: `recordBrowserSession(db, taskId, { provider, sessionId, recording, recordingUrl? })` stores the session on the row and a `browser_session` step on the trail.
+- `packages/playbooks` now depends on core, db, solari and playwright (fixtures as a dev dependency); the barrel exports the guardrails.
+
+### Assumptions recorded (low-risk, reversible)
+
+- **Top-level navigations only.** Subresources and embedded frames are not judged; a third-party frame is evidence for the payment detector, not a violation.
+- **Navigations are served from the guard.** Playwright never routes the request the browser makes while following a redirect (probed), so a top-level navigation is fetched with `route.fetch({ maxRedirects: 0 })` and fulfilled from here. A 3xx that leaves the lane is refused with the hop unsent; one that stays becomes a small document that `location.replace`s to the target, so the hop is a routed navigation and its own redirects are judged too. Cost: a 307/308 POST redirect continues as a GET, and every navigation body passes through Playwright (gzip bodies and cookies set on the 3xx verified by probe).
+- **A submitting page is captured before it navigates.** Reading a page while its own navigation is held at the route deadlocks (probed), so an init script hands the page snapshot up through `exposeBinding` on every `submit` event; it is kept per page until the next document commits (15 s window). A programmatic `form.submit()` fires no submit event, and that submission is judged on its body alone. XHR/fetch submissions get a live read raced against 1.5 s.
+- **A popup's first request has no frame** (Playwright throws); it is judged as a popup navigation on its URL alone.
+- **Session identity is stored for every provider**, local ids included, in `tasks.solari_session_id`; `recording_url` stays null until a provider hands one back.
+- **The lane is test-local.** The integration suite starts its own lane site through the fixture harness rather than adding a fifth product fixture; the "recorded pages" of the detector unit tests are hand-recorded snapshots (six payment pages, eight non-payment).
+- **Gate thresholds.** One strong signal (card field or value, security code, processor frame), or two medium ones (expiry, payment verb), or a medium one plus a checkout marker.
+- **Confirmation is one fingerprint, one reply.** An affirmative reply (`confirm`, `yes`, `approve`, `ok`, `go ahead`) to the `[payment-gate <fp>]` question lets that submission through on the rerun; any other reply gets the question again.
+
+### Findings
+
+- **Sibling typecheck red was transient.** The first verification round found `tsc -p tsconfig.test.json` red only on the watch-engine sibling's uncommitted `scheduler.integration.test.ts`; the sibling has committed since (`3e55fff`) and the filtered typecheck is clean.
+- **Lockfile.** `pnpm-lock.yaml` carries only the playbooks importer (the sibling's specifier changes went with its own finish); it is committed with this task. `.gitattributes` marks it `-diff`, so git shows it as binary.
+- **Readiness warning** `proof 'guardrails-red' uses a browser outside a declared browser boundary` is a warning, not an error; the proof drives a local Chromium against a loopback lane site and touches nothing outside the machine.
+
+### Receipts
+
+- RED: `node scripts/vitest.mjs run --project integration packages/playbooks/src/guardrails.integration.test.ts` → exit 1, `Cannot find module './guardrails/index.js'` (attributed).
+- GREEN: same command → 8 passed. Rules: the four unit suites → 50 passed. Gate: `node scripts/check.mjs` → see the ledger receipt.
+
+### Resume
+
+`nah implement s5`
+
 ## 2026-09-02 · implementation · userio-gate
 
 ### Where the frontier is
@@ -95,6 +182,62 @@
 - Root blockers: none
 - Done: 1/6
 - Receipts: verification-completed-eventc75e501c0b9844b68b468c29ec17058f, verification-completed-event95b4de8e04a649ba9bc73a37d079a346, verification-completed-eventa20f3fd88c57419d85f34c6fe29fd100, verification-completed-event3cc439ae178d481b9d6c6c5f86365f90, verification-completed-event9711a9c6a8a24baa903d024f4fb5e8a1
+- Findings: none
+- Assurance request: none
+- Knowledge revisions: none
+- Resume: `nah implement s5`
+
+<!-- nah-checkpoint:dca635e92bd6540d -->
+## 2026-09-02T05:49:09.684Z · claude-code · 8054cf2e-8aef-4bfd-8b27-56afcffb8a6f
+
+- Stage: implementation
+- Ready: replay-embed-page
+- In progress: guardrails
+- Root blockers: none
+- Done: 2/6
+- Receipts: verification-completed-eventc75e501c0b9844b68b468c29ec17058f, verification-completed-event95b4de8e04a649ba9bc73a37d079a346, verification-completed-eventa20f3fd88c57419d85f34c6fe29fd100, verification-completed-event3cc439ae178d481b9d6c6c5f86365f90, verification-completed-event9711a9c6a8a24baa903d024f4fb5e8a1, verification-completed-event1cc6f970db55419ca8abf720f56b120c, verification-completed-eventa518e31cece447b8a31ca3508624eaf4, verification-completed-eventc2f3eea1a9154ec2b4035f7a0e6da3f3, verification-completed-event29a9ff284177409b887b886fcb30b45d
+- Findings: none
+- Assurance request: none
+- Knowledge revisions: none
+- Resume: `nah implement s5`
+
+<!-- nah-checkpoint:0778e7224ad3d17c -->
+## 2026-09-02T06:09:29.786Z · claude-code · 8054cf2e-8aef-4bfd-8b27-56afcffb8a6f
+
+- Stage: implementation
+- Ready: replay-embed-page
+- In progress: guardrails
+- Root blockers: none
+- Done: 2/6
+- Receipts: verification-completed-eventc75e501c0b9844b68b468c29ec17058f, verification-completed-event95b4de8e04a649ba9bc73a37d079a346, verification-completed-eventa20f3fd88c57419d85f34c6fe29fd100, verification-completed-event3cc439ae178d481b9d6c6c5f86365f90, verification-completed-event9711a9c6a8a24baa903d024f4fb5e8a1, verification-completed-event1cc6f970db55419ca8abf720f56b120c, verification-completed-eventa518e31cece447b8a31ca3508624eaf4, verification-completed-eventc2f3eea1a9154ec2b4035f7a0e6da3f3, verification-completed-event29a9ff284177409b887b886fcb30b45d, verification-completed-event6e7d9ec0a1e1454ab19e3c53d1c3d8bc
+- Findings: none
+- Assurance request: none
+- Knowledge revisions: none
+- Resume: `nah implement s5`
+
+<!-- nah-checkpoint:585cd2353a37f562 -->
+## 2026-09-02T06:33:02.477Z · claude-code · 8054cf2e-8aef-4bfd-8b27-56afcffb8a6f
+
+- Stage: implementation
+- Ready: playbook-runner
+- In progress: replay-embed-page
+- Root blockers: none
+- Done: 3/6
+- Receipts: verification-completed-eventc75e501c0b9844b68b468c29ec17058f, verification-completed-event95b4de8e04a649ba9bc73a37d079a346, verification-completed-eventa20f3fd88c57419d85f34c6fe29fd100, verification-completed-event3cc439ae178d481b9d6c6c5f86365f90, verification-completed-event9711a9c6a8a24baa903d024f4fb5e8a1, verification-completed-event1cc6f970db55419ca8abf720f56b120c, verification-completed-eventa518e31cece447b8a31ca3508624eaf4, verification-completed-eventc2f3eea1a9154ec2b4035f7a0e6da3f3, verification-completed-event29a9ff284177409b887b886fcb30b45d, verification-completed-event6e7d9ec0a1e1454ab19e3c53d1c3d8bc, verification-completed-evente3356b555da844b3ac5f4b45bf5710c9, verification-completed-evente57fb0d0a41c4c77a15b68521e6a3f8e, verification-completed-event7cf1724816d74496adf34ab1a48f819f
+- Findings: none
+- Assurance request: none
+- Knowledge revisions: none
+- Resume: `nah implement s5`
+
+<!-- nah-checkpoint:ab6ffc3fc04150e7 -->
+## 2026-09-02T06:57:52.440Z · claude-code · 8054cf2e-8aef-4bfd-8b27-56afcffb8a6f
+
+- Stage: implementation
+- Ready: playbook-runner
+- In progress: replay-embed-page
+- Root blockers: none
+- Done: 3/6
+- Receipts: verification-completed-eventc75e501c0b9844b68b468c29ec17058f, verification-completed-event95b4de8e04a649ba9bc73a37d079a346, verification-completed-eventa20f3fd88c57419d85f34c6fe29fd100, verification-completed-event3cc439ae178d481b9d6c6c5f86365f90, verification-completed-event9711a9c6a8a24baa903d024f4fb5e8a1, verification-completed-event1cc6f970db55419ca8abf720f56b120c, verification-completed-eventa518e31cece447b8a31ca3508624eaf4, verification-completed-eventc2f3eea1a9154ec2b4035f7a0e6da3f3, verification-completed-event29a9ff284177409b887b886fcb30b45d, verification-completed-event6e7d9ec0a1e1454ab19e3c53d1c3d8bc, verification-completed-evente3356b555da844b3ac5f4b45bf5710c9, verification-completed-evente57fb0d0a41c4c77a15b68521e6a3f8e, verification-completed-event7cf1724816d74496adf34ab1a48f819f, verification-completed-eventaaaa3ad07a8f4c4aa2ccec9625b278d9, verification-completed-eventc68bfc15559148bf9992112ae606639e, verification-completed-event9891a8d6f6eb48e3b74c763f560d2655
 - Findings: none
 - Assurance request: none
 - Knowledge revisions: none

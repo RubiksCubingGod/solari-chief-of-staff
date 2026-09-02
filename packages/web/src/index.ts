@@ -31,7 +31,10 @@ export {
   type CredentialSource,
   type FetchLike,
   type HealthReport,
+  type RecordingReference,
   type Task,
+  type TaskDetail,
+  type TaskEvent,
   type Watch,
 } from './api-client';
 
