@@ -54,7 +54,7 @@ passes here it passes there.
 | `pnpm migrate` | Applies the migration set to `DATABASE_URL`. |
 | `pnpm browsers` | Downloads the pinned Chromium the browser provider drives. |
 | `pnpm start` | Runs the API server on `HOST` and `PORT`. |
-| `pnpm worker` | Runs the job worker: checks watches on their schedules, reconciles the schedule set once a minute, and runs queued tasks through their playbooks in a guarded browser. |
+| `pnpm worker` | Runs the job worker: checks watches on their schedules, reconciles the schedule set once a minute, runs queued tasks through their playbooks in a guarded browser, and scans the calendar every hour for reminders to send over Telegram. |
 | `pnpm clean` | Removes build output. |
 
 `pnpm start` and `pnpm worker` are the two long-running processes: one
@@ -67,6 +67,14 @@ Without it, watches that already have an extractor are still checked, and a
 watch that needs one is parked with that reason in its row rather than the
 process refusing to start. Every trigger it raises is one JSON line on stdout
 until a delivery channel lands.
+
+The worker sends calendar reminders over Telegram when `TELEGRAM_BOT_TOKEN` is
+set: every hour, and once at startup, it finds the entries whose lead day has
+come on each person's own calendar and sends each one message, in that
+person's morning. A reminder is recorded before it is sent, so a scan that
+runs twice or dies halfway never sends twice; a send that fails is retried by
+the next scan, three times at most, and every outcome is on the entry.
+Without the token the worker says so at startup and runs everything else.
 
 To change the schema, edit `packages/db/src/schema.ts`, then run
 `pnpm --filter @chief-of-staff/db generate` to write a new migration, and

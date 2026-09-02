@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { addDays, calendarDayIn, daysBetween, isIsoDate } from './dates.js';
+import { addDays, calendarDayIn, daysBetween, hourIn, isIsoDate } from './dates.js';
 
 /**
  * Calendar arithmetic on the `YYYY-MM-DD` strings Postgres `date` columns
@@ -83,5 +83,26 @@ describe('calendarDayIn', () => {
 
   it('refuses a zone it cannot place', () => {
     expect(() => calendarDayIn(instant, 'Mars/Olympus_Mons')).toThrow(RangeError);
+  });
+});
+
+describe('hourIn', () => {
+  const instant = new Date('2026-09-02T23:30:00Z');
+
+  it('is the hour on the person’s wall clock, 0 to 23', () => {
+    expect(hourIn(instant, 'Asia/Tokyo')).toBe(8);
+    expect(hourIn(instant, 'Europe/London')).toBe(0);
+    expect(hourIn(instant, 'America/New_York')).toBe(19);
+    expect(hourIn(instant, 'UTC')).toBe(23);
+  });
+
+  it('counts a half-hour zone by its hour', () => {
+    // 23:30 UTC is 05:00 in Kolkata: on the hour there, so no rounding question.
+    expect(hourIn(instant, 'Asia/Kolkata')).toBe(5);
+    expect(hourIn(new Date('2026-09-02T04:00:00Z'), 'Asia/Kolkata')).toBe(9);
+  });
+
+  it('refuses a zone it cannot place', () => {
+    expect(() => hourIn(instant, 'Mars/Olympus_Mons')).toThrow(RangeError);
   });
 });

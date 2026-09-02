@@ -24,6 +24,7 @@ export {
   type SendToUserOptions,
 } from './outbound.js';
 export { createRateLimiter, type RateLimiter, type RateLimitVerdict } from './rate-limit.js';
+export { createReminderSender } from './reminders.js';
 export {
   ANSWER_RECORDED,
   ASSISTANT_UNAVAILABLE,
@@ -52,10 +53,12 @@ export {
 } from './routing.js';
 export {
   createBotRuntime,
+  createTelegramOutbound,
   logPollingFailure,
   logUpdateFailure,
   type BotRuntime,
   type BotRuntimeOptions,
+  type TelegramOutboundOptions,
 } from './runtime.js';
 export {
   recordMessage,

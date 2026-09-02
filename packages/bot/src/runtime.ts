@@ -206,12 +206,7 @@ export function createBotRuntime(options: BotRuntimeOptions): BotRuntime {
     bot,
     // Sends through `bot.api`, so a delivery crosses the same transformer
     // stack a reply does and is transcribed by the same one row of code.
-    sendToUser: createSendToUser({
-      db,
-      sender: telegramSender(bot),
-      ...(options.sendRetry === undefined ? {} : { retry: options.sendRetry }),
-      ...(options.wait === undefined ? {} : { wait: options.wait }),
-    }),
+    sendToUser: outboundOver(bot, db, options),
 
     webhookHandler() {
       if (config.transport !== 'webhook') {
@@ -249,6 +244,45 @@ export function createBotRuntime(options: BotRuntimeOptions): BotRuntime {
       await bot.stop();
     },
   };
+}
+
+export interface TelegramOutboundOptions {
+  readonly config: BotConfig;
+  readonly db: BotDatabase;
+  /** Installed closest to the network; tests pass the test transport, production nothing. */
+  readonly transformer?: Transformer;
+  readonly sendRetry?: SendRetryPolicy;
+  readonly wait?: (ms: number) => Promise<void>;
+}
+
+/**
+ * The outbound door on its own, for a process that sends but does not listen.
+ *
+ * The worker delivers reminders and puts questions in front of people, and it
+ * must not also poll for updates: two processes long-polling one token is
+ * how Telegram hands each of them half the conversation. So it gets a `Bot`
+ * with the same transformer stack as the runtime's - transcript outermost -
+ * and none of the middleware, and never calls `start()`. The Bot API needs
+ * no `init` to send, only to receive.
+ */
+export function createTelegramOutbound(options: TelegramOutboundOptions): SendToUser {
+  const bot = new Bot(options.config.token);
+  if (options.transformer !== undefined) bot.api.config.use(options.transformer);
+  bot.api.config.use(transcribeOutbound(options.db));
+  return outboundOver(bot, options.db, options);
+}
+
+function outboundOver(
+  bot: Bot,
+  db: BotDatabase,
+  options: Pick<BotRuntimeOptions, 'sendRetry' | 'wait'>,
+): SendToUser {
+  return createSendToUser({
+    db,
+    sender: telegramSender(bot),
+    ...(options.sendRetry === undefined ? {} : { retry: options.sendRetry }),
+    ...(options.wait === undefined ? {} : { wait: options.wait }),
+  });
 }
 
 /**

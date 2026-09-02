@@ -1,14 +1,29 @@
 export {
   annotateCalendarItem,
+  claimReminder,
   recordAutoCancel,
   recordReminder,
+  settleReminder,
   type AnnotateOptions,
   type AnnotateOutcome,
   type AutoCancelDecision,
   type AutoCancelRecord,
   type CalendarDatabase,
   type ReminderRecord,
+  type ReminderSettlement,
 } from './calendar-ledger.js';
+export {
+  CALENDAR_SCAN_CRON,
+  CALENDAR_SCAN_QUEUE,
+  REMINDER_SEND_ATTEMPTS,
+  REMINDER_SEND_FROM_HOUR,
+  registerCalendarScan,
+  runCalendarScan,
+  type CalendarScanOptions,
+  type CalendarScanReport,
+  type ReminderSendOutcome,
+  type ReminderSender,
+} from './calendar-scan.js';
 export { createDatabase, logPoolError, type Database } from './client.js';
 export {
   DEFAULT_RETRY_POLICY,

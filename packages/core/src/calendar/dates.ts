@@ -57,3 +57,16 @@ export function calendarDayIn(instant: Date, timeZone: string): IsoDate {
     day: '2-digit',
   }).format(instant);
 }
+
+/**
+ * The hour of the day it is at `instant` on a clock in `timeZone`, 0 to 23.
+ * With `calendarDayIn` this is the whole of "is it their morning yet": the
+ * scan holds a day's reminders until the person is likely to be awake.
+ */
+export function hourIn(instant: Date, timeZone: string): number {
+  return Number(
+    new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', hourCycle: 'h23' }).format(
+      instant,
+    ),
+  );
+}

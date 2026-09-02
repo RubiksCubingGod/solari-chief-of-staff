@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Runs the job worker against DATABASE_URL. Documented as `pnpm worker`.
 //
-// The process is TypeScript, so this builds the watch and playbooks packages
-// - and through their project references the agent, core, db and solari
-// packages - before importing them, for the same reason `pnpm migrate` does:
+// The process is TypeScript, so this builds the watch, playbooks and bot
+// packages - and through their project references the agent, core, db and
+// solari packages - before importing them, for the same reason `pnpm migrate` does:
 // a documented command has to work from a fresh clone without anyone knowing
 // to build first. The build is incremental, so repeat runs are almost free.
 import { spawn } from 'node:child_process';
@@ -15,7 +15,13 @@ const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
 
 const build = spawn(
   process.execPath,
-  ['node_modules/typescript/bin/tsc', '--build', 'packages/watch', 'packages/playbooks'],
+  [
+    'node_modules/typescript/bin/tsc',
+    '--build',
+    'packages/watch',
+    'packages/playbooks',
+    'packages/bot',
+  ],
   { cwd: repositoryRoot, shell: false, stdio: 'inherit' },
 );
 
@@ -42,8 +48,9 @@ async function run() {
     return;
   }
 
-  const [agent, db, playbooks, solari, watch] = await Promise.all([
+  const [agent, bot, db, playbooks, solari, watch] = await Promise.all([
     import('../packages/agent/dist/index.js'),
+    import('../packages/bot/dist/index.js'),
     import('../packages/db/dist/index.js'),
     import('../packages/playbooks/dist/index.js'),
     import('../packages/solari/dist/index.js'),
@@ -76,6 +83,7 @@ async function run() {
     worker = await db.startWorker({ connectionString }, [
       watch.registerWatchEngine({ db: database, ladder, creator, notifier }),
       db.registerTaskEngine({ db: database.db, mission, userIO: db.createLogUserIO() }),
+      ...calendarScan(bot, db, database),
     ]);
   } catch (error) {
     process.stderr.write(`worker: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -92,6 +100,28 @@ async function run() {
     process.stdout.write('worker: stopped\n');
   });
   process.stdout.write('worker: ready\n');
+}
+
+/**
+ * The reminder scan, or its absence spelled out. Reminders go out over
+ * Telegram, so without the bot's token there is nowhere to send them: the
+ * worker says so once at startup and runs everything else, rather than
+ * recording every reminder it would have sent as skipped. With the token it
+ * sends through the bot's outbound door without listening for updates - the
+ * bot process is the one that polls, and Telegram allows only one.
+ */
+function calendarScan(bot, db, database) {
+  const token = process.env['TELEGRAM_BOT_TOKEN']?.trim();
+  if (token === undefined || token === '') {
+    process.stderr.write(
+      'worker: TELEGRAM_BOT_TOKEN is not set, so calendar reminders are not scanned; watches and tasks still run\n',
+    );
+    return [];
+  }
+  const sendToUser = bot.createTelegramOutbound({ config: bot.loadBotConfig(), db: database.db });
+  return [
+    db.registerCalendarScan({ db: database.db, send: bot.createReminderSender(sendToUser) }),
+  ];
 }
 
 /**

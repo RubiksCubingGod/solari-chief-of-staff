@@ -3,6 +3,7 @@ import {
   canAnnotate,
   type CalendarAnnotation,
   type CalendarAutoCancelState,
+  type CalendarReminderState,
   type IsoDate,
 } from '@chief-of-staff/core';
 import { and, eq, inArray, isNull, or } from 'drizzle-orm';
@@ -26,7 +27,9 @@ import type { TaskDatabase } from './task-ledger.js';
  * auto-cancel is recorded with `ON CONFLICT DO NOTHING` against the unique key
  * the migration declares, so the second writer gets the first writer's row
  * back and knows it was second. That is the whole of "record before dispatch":
- * whoever holds the freshly inserted row is the one who sends.
+ * whoever holds the freshly inserted row is the one who sends - and, because
+ * a crashed scan leaves its row behind for the next one, whoever wins the
+ * claim on a row that is still pending.
  */
 
 export type CalendarDatabase = TaskDatabase;
@@ -107,6 +110,56 @@ export async function recordReminder(
     throw new Error(`reminder ${itemId} for ${dueOn} was neither inserted nor found`);
   }
   return { recorded: false, reminder: existing };
+}
+
+/**
+ * Takes a reminder for one send attempt, if nobody else has since the caller
+ * read it. The attempt counter doubles as the lock: the `UPDATE` only lands
+ * on the count the caller saw, so of two scans holding the same row exactly
+ * one gets it back. A row claimed by a scan that then died stays pending with
+ * the attempt counted, which is what lets the next scan retry it - boundedly.
+ */
+export async function claimReminder(
+  db: CalendarDatabase,
+  reminder: CalendarReminder,
+): Promise<CalendarReminder | undefined> {
+  const [claimed] = await db
+    .update(calendarReminders)
+    .set({ attempts: reminder.attempts + 1 })
+    .where(
+      and(eq(calendarReminders.id, reminder.id), eq(calendarReminders.attempts, reminder.attempts)),
+    )
+    .returning();
+  return claimed;
+}
+
+export interface ReminderSettlement {
+  readonly state: CalendarReminderState;
+  /** The delivery row the send was recorded as, when the door recorded one. */
+  readonly deliveryId?: string | undefined;
+  /** What went wrong, kept only on a failure. */
+  readonly error?: string | undefined;
+  readonly now?: Date;
+}
+
+/** Writes down how a claimed send ended. */
+export async function settleReminder(
+  db: CalendarDatabase,
+  reminderId: string,
+  settlement: ReminderSettlement,
+): Promise<CalendarReminder> {
+  const [settled] = await db
+    .update(calendarReminders)
+    .set({
+      state: settlement.state,
+      deliveryId: settlement.deliveryId ?? null,
+      error: settlement.state === 'failed' ? (settlement.error ?? null) : null,
+      settledAt: settlement.now ?? new Date(),
+    })
+    .where(eq(calendarReminders.id, reminderId))
+    .returning();
+  if (settled === undefined) throw new Error(`reminder ${reminderId} vanished before it settled`);
+  return settled;
 }
 
 export interface AutoCancelDecision {
