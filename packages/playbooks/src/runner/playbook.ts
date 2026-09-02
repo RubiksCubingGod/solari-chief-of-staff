@@ -6,7 +6,7 @@ import type { DomainAllowlist } from '../guardrails/index.js';
 
 /**
  * A playbook is a typed step program: an ordered list of steps, each driving
- * the guarded page and answering with one of three outcomes. The runner owns
+ * the guarded page and answering with one of four outcomes. The runner owns
  * everything around the steps - the session, the guardrails, the trail, the
  * transitions - so a playbook is only what a site demands, in order.
  *
@@ -28,8 +28,12 @@ export interface PlaybookContext {
   readonly task: Task;
   /** The task's input as a record. A task whose input is not one never reaches a step. */
   readonly input: Readonly<Record<string, unknown>>;
-  readonly connection: SiteConnection;
-  readonly credential: SiteCredential;
+  /**
+   * The person's connection to the site, and what it yields for a login step.
+   * Absent for an `open` playbook: the site has no account to sign in to.
+   */
+  readonly connection?: SiteConnection;
+  readonly credential?: SiteCredential;
   /** Every answer accepted so far, oldest first. */
   readonly answers: readonly TaskAnswer[];
   /** The latest accepted reply to exactly this question, or `undefined` while nobody has given one. */
@@ -37,16 +41,39 @@ export interface PlaybookContext {
 }
 
 export type StepOutcome =
-  | { readonly kind: 'done'; readonly detail?: unknown }
+  | {
+      readonly kind: 'done';
+      readonly detail?: unknown;
+      /**
+       * Fields for the task's result, beside the trail: what a reader of the
+       * finished task needs at hand, such as a booking reference. The runner
+       * folds them into the result under its own fields.
+       */
+      readonly result?: Readonly<Record<string, unknown>>;
+    }
   /** The step needs a person. The mission parks here and runs again once there is a reply. */
   | { readonly kind: 'ask'; readonly question: string }
-  | { readonly kind: 'failed'; readonly reason: string; readonly detail?: unknown };
+  | { readonly kind: 'failed'; readonly reason: string; readonly detail?: unknown }
+  /**
+   * The site, or the person, would not do what the task asked: nothing broke
+   * and there is nothing to retry. The task fails by `refused`, and `detail`
+   * says which refusal, in whatever vocabulary the task's kind shares with
+   * the reader of its outcome.
+   */
+  | { readonly kind: 'refused'; readonly reason: string; readonly detail?: unknown };
 
 export interface PlaybookStep {
   /** The trail's name for the step. Unique within its playbook. */
   readonly name: string;
   run(page: Page, context: PlaybookContext): Promise<StepOutcome>;
 }
+
+/**
+ * Whether the playbook signs in. `connection` needs the person's connection to
+ * the site, and its credential, before a step runs; `open` runs against a
+ * site with no account behind it, in a session with no profile.
+ */
+export type PlaybookAccess = 'connection' | 'open';
 
 export interface Playbook {
   /** Written to the task row as `playbook_id`, e.g. `fakegym.cancel`. */
@@ -58,6 +85,7 @@ export interface Playbook {
   readonly origin: string;
   /** The `site_domain` of the connection the playbook signs in with: the origin's host, port included. */
   readonly siteDomain: string;
+  readonly access: PlaybookAccess;
   /** Every host the steps may take the browser to. */
   readonly allowlist: DomainAllowlist;
   readonly steps: readonly PlaybookStep[];
@@ -71,6 +99,8 @@ export interface PlaybookDefinition {
   readonly origin: string;
   /** Hosts besides the origin's own that the steps may visit. */
   readonly alsoAllow?: DomainAllowlist;
+  /** `connection` unless said otherwise: a playbook that signs in to nothing has to say so. */
+  readonly access?: PlaybookAccess;
   readonly steps: readonly PlaybookStep[];
 }
 
@@ -104,6 +134,7 @@ export function definePlaybook(definition: PlaybookDefinition): Playbook {
     action: definition.action,
     origin: origin.origin,
     siteDomain: origin.host,
+    access: definition.access ?? 'connection',
     allowlist: [origin.hostname, ...(definition.alsoAllow ?? [])],
     steps: [...definition.steps],
   };

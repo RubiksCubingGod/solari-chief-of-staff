@@ -47,8 +47,8 @@ export function bookSlotInput(
 
 /** The task input read back, or `undefined` when it is not one this vocabulary wrote. */
 export function parseBookSlotInput(value: unknown): BookSlotInput | undefined {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
-  const record = value as Record<string, unknown>;
+  const record = asRecord(value);
+  if (record === undefined) return undefined;
   const site = record['site'];
   const watchId = record['watchId'];
   const url = record['url'];
@@ -62,4 +62,49 @@ export function parseBookSlotInput(value: unknown): BookSlotInput | undefined {
   if (applicant === undefined) return undefined;
   if (typeof autoBook !== 'boolean') return undefined;
   return { site, watchId, url, slot: { id: slot.id, label: slot.label }, applicant, auto_book: autoBook };
+}
+
+/**
+ * Why a booking playbook would not book, as the watch's re-arm reads it off
+ * the failed task. `slot-gone` re-arms the watch with its baseline cleared -
+ * the slot may come back, and would be news; `not-confirmed` re-arms it with
+ * the baseline kept - the person saw that slot and said no.
+ */
+export const BOOK_SLOT_REFUSALS = ['slot-gone', 'not-confirmed'] as const;
+export type BookSlotRefusal = (typeof BOOK_SLOT_REFUSALS)[number];
+
+export function isBookSlotRefusal(value: unknown): value is BookSlotRefusal {
+  return typeof value === 'string' && (BOOK_SLOT_REFUSALS as readonly string[]).includes(value);
+}
+
+/**
+ * The refusal a failed task's transition detail names - the runner's
+ * `{ reason, detail: { code } }` - or `undefined` when the task failed for
+ * some other reason, which is not a refusal at all.
+ */
+export function bookSlotRefusal(transitionDetail: unknown): BookSlotRefusal | undefined {
+  const code = asRecord(asRecord(transitionDetail)?.['detail'])?.['code'];
+  return isBookSlotRefusal(code) ? code : undefined;
+}
+
+/** What a booked task has to show for itself: the site's confirmation, on the task's result. */
+export interface BookSlotBooked {
+  readonly reference: string;
+  readonly bookedAt: string;
+}
+
+/** The booking a succeeded task's result carries, or `undefined` when it carries none. */
+export function parseBookSlotBooked(result: unknown): BookSlotBooked | undefined {
+  const record = asRecord(result);
+  const reference = record?.['reference'];
+  const bookedAt = record?.['bookedAt'];
+  if (typeof reference !== 'string' || reference === '') return undefined;
+  if (typeof bookedAt !== 'string' || bookedAt === '') return undefined;
+  return { reference, bookedAt };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
 }

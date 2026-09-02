@@ -57,6 +57,7 @@ describe('the task transition table', () => {
       ['running', 'succeeded', 'succeeded'],
       ['running', 'error', 'failed'],
       ['running', 'violation', 'failed'],
+      ['running', 'refused', 'failed'],
       ['waiting_user', 'timeout', 'failed'],
       ['running', 'orphaned', 'failed'],
       ['waiting_user', 'declined', 'cancelled'],
@@ -64,6 +65,7 @@ describe('the task transition table', () => {
       ['queued', 'succeeded', undefined],
       ['succeeded', 'started', undefined],
       ['running', 'answered', undefined],
+      ['waiting_user', 'refused', undefined],
       ['waiting_user', 'succeeded', undefined],
     ];
     for (const [status, cause, target] of cases) {

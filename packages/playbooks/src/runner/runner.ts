@@ -25,7 +25,8 @@ import type { PlaybookRegistry } from './registry.js';
 /**
  * The runner: the mission every playbook-mode task goes through. It picks the
  * playbook by what the task names, loads the person's connection to that
- * site, opens one guarded session with a recording asked for, writes the
+ * site (unless the playbook is open: a site with no account behind it),
+ * opens one guarded session with a recording asked for, writes the
  * session to the row, and runs the steps in order until one asks, one fails,
  * the guard stops the session, or the last one is done. What it hands back
  * is the state machine's own vocabulary, so the engine settles the task
@@ -116,6 +117,7 @@ function trailDetail(outcome: StepOutcome): unknown {
     case 'ask':
       return { question: outcome.question };
     case 'failed':
+    case 'refused':
       return outcome.detail === undefined
         ? { reason: outcome.reason }
         : { reason: outcome.reason, detail: outcome.detail };
@@ -129,6 +131,10 @@ function trailDetail(outcome: StepOutcome): unknown {
  * once the guard has stopped, nothing more is written here, because the
  * session is being released under the step and the stop is the mission's
  * outcome, not the step's.
+ *
+ * The result of a run that reaches the end is the playbook, the completed
+ * steps, and whatever the steps handed back for it, folded in under the
+ * runner's own two fields so a step cannot rename the playbook.
  */
 export async function runSteps(
   playbook: Playbook,
@@ -138,6 +144,7 @@ export async function runSteps(
   log: (payload: StepEventPayload) => Promise<void>,
 ): Promise<MissionOutcome> {
   const completed: { readonly name: string; readonly detail?: unknown }[] = [];
+  let handedBack: Record<string, unknown> = {};
   for (const step of playbook.steps) {
     if (guard.stop !== undefined) return stopOutcome(guard.stop);
     const outcome = await settle(step, page, context);
@@ -155,6 +162,7 @@ export async function runSteps(
             ? { name: step.name }
             : { name: step.name, detail: outcome.detail },
         );
+        if (outcome.result !== undefined) handedBack = { ...handedBack, ...outcome.result };
         break;
       case 'ask':
         return { kind: 'ask', question: outcome.question };
@@ -162,13 +170,40 @@ export async function runSteps(
         return outcome.detail === undefined
           ? { kind: 'failed', reason: `${step.name}: ${outcome.reason}` }
           : { kind: 'failed', reason: `${step.name}: ${outcome.reason}`, detail: outcome.detail };
+      case 'refused':
+        return outcome.detail === undefined
+          ? { kind: 'failed', cause: 'refused', reason: `${step.name}: ${outcome.reason}` }
+          : { kind: 'failed', cause: 'refused', reason: `${step.name}: ${outcome.reason}`, detail: outcome.detail };
     }
   }
-  return { kind: 'succeeded', result: { playbook: playbook.id, steps: completed } };
+  return { kind: 'succeeded', result: { ...handedBack, playbook: playbook.id, steps: completed } };
 }
 
 function refusal(reason: string): MissionOutcome {
   return { kind: 'failed', reason };
+}
+
+/** How a run gets onto the site: signed in with what the connection yields, or as anyone, or not at all. */
+type Access =
+  | { readonly kind: 'signed-in'; readonly connection: SiteConnection; readonly credential: SiteCredential }
+  | { readonly kind: 'open' }
+  | { readonly kind: 'refused'; readonly reason: string };
+
+/** The connection and credential a `connection` playbook signs in with, or why it cannot. */
+async function signIn(
+  options: PlaybookRunnerOptions,
+  credentials: CredentialSource,
+  task: Task,
+  playbook: Playbook,
+): Promise<Access> {
+  const connection = await readSiteConnection(options.db, task.userId, playbook.siteDomain);
+  if (connection === undefined) return { kind: 'refused', reason: `no site connection for ${playbook.siteDomain}` };
+  if (connection.status !== 'connected') {
+    return { kind: 'refused', reason: `the site connection for ${playbook.siteDomain} is ${connection.status}` };
+  }
+  const credential = await credentials(connection, task);
+  if (credential === undefined) return { kind: 'refused', reason: `no credential for ${playbook.siteDomain}` };
+  return { kind: 'signed-in', connection, credential };
 }
 
 /** The mission a worker registers the task engine with. */
@@ -179,24 +214,19 @@ export function createPlaybookMission(options: PlaybookRunnerOptions): Mission {
     if (choice.kind === 'refused') return refusal(choice.reason);
     const { playbook } = choice;
     await recordPlaybook(options.db, task.id, playbook.id);
-    const connection = await readSiteConnection(options.db, task.userId, playbook.siteDomain);
-    if (connection === undefined) return refusal(`no site connection for ${playbook.siteDomain}`);
-    if (connection.status !== 'connected') {
-      return refusal(`the site connection for ${playbook.siteDomain} is ${connection.status}`);
-    }
-    const credential = await credentials(connection, task);
-    if (credential === undefined) return refusal(`no credential for ${playbook.siteDomain}`);
+    const access: Access =
+      playbook.access === 'open' ? { kind: 'open' } : await signIn(options, credentials, task, playbook);
+    if (access.kind === 'refused') return refusal(access.reason);
     const context: PlaybookContext = {
       task,
       input: choice.input,
-      connection,
-      credential,
+      ...(access.kind === 'signed-in' ? { connection: access.connection, credential: access.credential } : {}),
       answers,
       answerTo: (question) => answerTo(answers, question),
     };
     const request: BrowserRequest =
-      credential.kind === 'profile'
-        ? { ...options.request, profileId: credential.profileId }
+      access.kind === 'signed-in' && access.credential.kind === 'profile'
+        ? { ...options.request, profileId: access.credential.profileId }
         : { ...options.request };
     const run = await guardedSession(
       {

@@ -168,6 +168,55 @@ describe('runSteps', () => {
     expect(ran).toBe(false);
   });
 
+  it('fails by refused on a step that refuses, naming the step and keeping its detail, and runs nothing after it', async () => {
+    let ran = false;
+    const { outcome, trail } = await drive([
+      done('availability'),
+      step('confirm', () =>
+        Promise.resolve({ kind: 'refused', reason: 'the person said no', detail: { code: 'not-confirmed' } }),
+      ),
+      step('book', () => {
+        ran = true;
+        return Promise.resolve({ kind: 'done' });
+      }),
+    ]);
+    expect(outcome).toEqual({
+      kind: 'failed',
+      cause: 'refused',
+      reason: 'confirm: the person said no',
+      detail: { code: 'not-confirmed' },
+    });
+    expect(trail.at(-1)).toEqual({
+      name: 'confirm',
+      outcome: 'refused',
+      detail: { reason: 'the person said no', detail: { code: 'not-confirmed' } },
+    });
+    expect(ran).toBe(false);
+  });
+
+  it('fails by refused without detail when the refusing step gave none', async () => {
+    const { outcome, trail } = await drive([step('confirm', () => Promise.resolve({ kind: 'refused', reason: 'no' }))]);
+    expect(outcome).toEqual({ kind: 'failed', cause: 'refused', reason: 'confirm: no' });
+    expect(trail).toEqual([{ name: 'confirm', outcome: 'refused', detail: { reason: 'no' } }]);
+  });
+
+  it("folds what done steps hand back for the result into it, under the runner's own fields", async () => {
+    const { outcome } = await drive([
+      step('availability', () => Promise.resolve({ kind: 'done', detail: { slot: 'Tue' } })),
+      step('book', () => Promise.resolve({ kind: 'done', result: { reference: 'DMV-000001', playbook: 'not-this' } })),
+      step('after', () => Promise.resolve({ kind: 'done', result: { bookedAt: '2026-09-02T10:00:00.000Z' } })),
+    ]);
+    expect(outcome).toEqual({
+      kind: 'succeeded',
+      result: {
+        playbook: 'fakegym.cancel',
+        steps: [{ name: 'availability', detail: { slot: 'Tue' } }, { name: 'book' }, { name: 'after' }],
+        reference: 'DMV-000001',
+        bookedAt: '2026-09-02T10:00:00.000Z',
+      },
+    });
+  });
+
   it('fails on a step that throws, with the message as the reason and no detail', async () => {
     const { outcome, trail } = await drive([step('cancel', () => Promise.reject(new Error('the page fell over')))]);
     expect(outcome).toEqual({ kind: 'failed', reason: 'cancel: the page fell over' });
@@ -218,7 +267,7 @@ describe('runSteps', () => {
         step('code', (_page, { answerTo: reply, credential, connection: seen }) =>
           Promise.resolve({
             kind: 'done',
-            detail: { code: reply('Which code?'), credential, domain: seen.siteDomain },
+            detail: { code: reply('Which code?'), credential, domain: seen?.siteDomain },
           }),
         ),
       ],
@@ -241,6 +290,23 @@ describe('runSteps', () => {
         ],
       },
     });
+  });
+});
+
+describe('definePlaybook', () => {
+  it('signs in by default, and says so on the playbook', () => {
+    expect(playbook([done('login')]).access).toBe('connection');
+  });
+
+  it('is open when the definition says so', () => {
+    const open = definePlaybook({
+      site: 'fakedmv',
+      action: 'book_slot',
+      origin: 'http://127.0.0.1:4304',
+      access: 'open',
+      steps: [done('availability')],
+    });
+    expect(open).toMatchObject({ id: 'fakedmv.book_slot', access: 'open', siteDomain: '127.0.0.1:4304', allowlist: ['127.0.0.1'] });
   });
 });
 

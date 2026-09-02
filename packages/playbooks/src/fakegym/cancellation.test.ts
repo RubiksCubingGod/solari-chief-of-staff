@@ -1,5 +1,8 @@
+import type { Task } from '@chief-of-staff/db';
+import type { Page } from 'playwright';
 import { describe, expect, it } from 'vitest';
 
+import type { PlaybookContext } from '../runner/playbook.js';
 import {
   CODE_QUESTION,
   CODE_RETRY_QUESTION,
@@ -112,5 +115,39 @@ describe('fakegymCancellation', () => {
     expect(() => fakegymCancellation({ origin: 'the gym' })).toThrow(
       'playbook fakegym.cancel: origin the gym is not a URL',
     );
+  });
+});
+
+describe('the login step', () => {
+  const task: Task = {
+    id: 'task-1',
+    userId: 'user-1',
+    kind: 'cancel',
+    input: { site: 'fakegym' },
+    status: 'running',
+    mode: 'playbook',
+    playbookId: null,
+    solariSessionId: null,
+    recordingUrl: null,
+    jobId: null,
+    result: null,
+    createdAt: new Date('2026-09-02T10:00:00Z'),
+    finishedAt: null,
+  };
+  /** The sign-in page, as a step that has nothing to fill into it finds it. */
+  const signInPage = {
+    goto: () => Promise.resolve(null),
+    url: () => 'http://127.0.0.1:4303/login',
+    locator: () => ({ count: () => Promise.resolve(0) }),
+  } as unknown as Page;
+
+  it('fails, asking for the site to be connected, when it reaches the sign-in page with no credential', async () => {
+    const login = fakegymCancellation({ origin: 'http://127.0.0.1:4303' }).steps[0];
+    if (login === undefined) throw new Error('the playbook has no steps');
+    const context: PlaybookContext = { task, input: { site: 'fakegym' }, answers: [], answerTo: () => undefined };
+    await expect(login.run(signInPage, context)).resolves.toEqual({
+      kind: 'failed',
+      reason: 'fakegym needs a signed-in session; connect this site',
+    });
   });
 });

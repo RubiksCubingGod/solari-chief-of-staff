@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import { BOOK_SLOT_TASK_KIND, bookSlotInput, parseBookSlotInput, type BookSlotInput } from './book-slot.js';
+import {
+  BOOK_SLOT_REFUSALS,
+  BOOK_SLOT_TASK_KIND,
+  bookSlotInput,
+  bookSlotRefusal,
+  isBookSlotRefusal,
+  parseBookSlotBooked,
+  parseBookSlotInput,
+  type BookSlotInput,
+} from './book-slot.js';
 import { TASK_KINDS } from './index.js';
 import type { SlotCondition } from './watch/condition.js';
 
@@ -62,5 +71,47 @@ describe('parseBookSlotInput', () => {
     ['a non-boolean auto_book', { ...INPUT, auto_book: 'yes' }],
   ])('refuses %s', (_label, value) => {
     expect(parseBookSlotInput(value)).toBeUndefined();
+  });
+});
+
+describe('bookSlotRefusal', () => {
+  it('names the two refusals and guards them', () => {
+    expect(BOOK_SLOT_REFUSALS).toEqual(['slot-gone', 'not-confirmed']);
+    expect(isBookSlotRefusal('slot-gone')).toBe(true);
+    expect(isBookSlotRefusal('gone')).toBe(false);
+    expect(isBookSlotRefusal(null)).toBe(false);
+  });
+
+  it("reads the refusal off a failed transition's detail, the way the runner writes it", () => {
+    expect(bookSlotRefusal({ reason: 'availability: the slot is gone', detail: { code: 'slot-gone' } })).toBe('slot-gone');
+    expect(bookSlotRefusal({ reason: 'confirm: no', detail: { code: 'not-confirmed' } })).toBe('not-confirmed');
+  });
+
+  it('reads nothing off a failure that was not a refusal', () => {
+    expect(bookSlotRefusal({ reason: 'book: the page fell over' })).toBeUndefined();
+    expect(bookSlotRefusal({ reason: 'x', detail: { code: 'gone' } })).toBeUndefined();
+    expect(bookSlotRefusal({ reason: 'x', detail: 'slot-gone' })).toBeUndefined();
+    expect(bookSlotRefusal(null)).toBeUndefined();
+    expect(bookSlotRefusal('slot-gone')).toBeUndefined();
+  });
+});
+
+describe('parseBookSlotBooked', () => {
+  it('reads the reference and the time off a succeeded task result', () => {
+    expect(parseBookSlotBooked({ playbook: 'fakedmv.book_slot', reference: 'DMV-123456', bookedAt: '2026-09-02T10:00:00.000Z' })).toEqual({
+      reference: 'DMV-123456',
+      bookedAt: '2026-09-02T10:00:00.000Z',
+    });
+  });
+
+  it.each([
+    ['no result', null],
+    ['a result with no reference', { bookedAt: '2026-09-02T10:00:00.000Z' }],
+    ['a blank reference', { reference: '', bookedAt: '2026-09-02T10:00:00.000Z' }],
+    ['a result with no time', { reference: 'DMV-123456' }],
+    ['a blank time', { reference: 'DMV-123456', bookedAt: '' }],
+    ['a non-object', 'DMV-123456'],
+  ])('reads nothing off %s', (_label, value) => {
+    expect(parseBookSlotBooked(value)).toBeUndefined();
   });
 });

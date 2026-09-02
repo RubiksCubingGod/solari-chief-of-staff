@@ -1,3 +1,5 @@
+import { randomInt } from 'node:crypto';
+
 import express, { type Express } from 'express';
 
 import {
@@ -36,6 +38,8 @@ export interface Booking {
   readonly slotId: string;
   readonly name: string;
   readonly bookedAt: string;
+  /** The confirmation the site hands back: `DMV-` and six digits. The one thing a booked task has to show for itself. */
+  readonly reference: string;
 }
 
 /** Everything a fakedmv instance knows, as `GET /__test/state` reports it. */
@@ -104,6 +108,10 @@ function renderCalendar(slots: MutableSlot[]): string {
       '      </ul>',
     ].join('\n'),
   });
+}
+
+function mintReference(): string {
+  return `DMV-${randomInt(0, 1_000_000).toString().padStart(6, '0')}`;
 }
 
 /**
@@ -220,7 +228,7 @@ export function startFakedmvFixture(
       slot.status = 'taken';
       await persistenceLatency();
 
-      const booking: Booking = { slotId, name, bookedAt: new Date().toISOString() };
+      const booking: Booking = { slotId, name, bookedAt: new Date().toISOString(), reference: mintReference() };
       bookings.push(booking);
       response.json(booking);
     });

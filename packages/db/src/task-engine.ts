@@ -37,8 +37,12 @@ export type MissionOutcome =
   | { readonly kind: 'succeeded'; readonly result?: unknown }
   | {
       readonly kind: 'failed';
-      /** `violation` when a guardrail stopped the mission; `error` otherwise, and by default. */
-      readonly cause?: 'error' | 'violation';
+      /**
+       * `violation` when a guardrail stopped the mission; `refused` when the
+       * site or the person would not do what the task asked, so nothing broke
+       * and there is nothing to retry; `error` otherwise, and by default.
+       */
+      readonly cause?: 'error' | 'violation' | 'refused';
       readonly reason: string;
       readonly detail?: unknown;
     }

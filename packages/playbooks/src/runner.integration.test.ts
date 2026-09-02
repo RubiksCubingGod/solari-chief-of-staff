@@ -340,7 +340,7 @@ function lastTransition(timeline: TaskTimeline): TransitionEventPayload | undefi
 const login: PlaybookStep = {
   name: 'login',
   async run(page, { credential }) {
-    if (credential.kind !== 'password') return { kind: 'failed', reason: 'the toy site needs a password' };
+    if (credential?.kind !== 'password') return { kind: 'failed', reason: 'the toy site needs a password' };
     await page.goto(`${toy.url}/login`);
     await page.getByTestId('email').fill(credential.username);
     await page.getByTestId('password').fill(credential.password);
@@ -392,7 +392,7 @@ const wander: PlaybookStep = {
 const probe: PlaybookStep = {
   name: 'probe',
   run: (_page, { connection, credential, input }) =>
-    Promise.resolve({ kind: 'done', detail: { domain: connection.siteDomain, credential, input } }),
+    Promise.resolve({ kind: 'done', detail: { domain: connection?.siteDomain, credential, input } }),
 };
 
 describe('the runner', () => {

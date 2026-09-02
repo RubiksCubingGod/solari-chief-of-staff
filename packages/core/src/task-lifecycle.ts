@@ -48,6 +48,12 @@ export const TRANSITION_CAUSES = [
   'error',
   /** A guardrail stopped the mission: it left its lane, or tried to pay. */
   'violation',
+  /**
+   * The site would not do what the task asked - the slot was gone by the time
+   * the playbook reached it, or the person said no at its gate - so there is
+   * nothing to retry and nothing to blame the mission for.
+   */
+  'refused',
   /** Nobody answered the question before its deadline. */
   'timeout',
   /** The worker died and pg-boss has no retry left to give the job. */
@@ -78,6 +84,7 @@ export const TASK_TRANSITIONS: Readonly<Record<TransitionCause, TaskTransition>>
   succeeded: { from: ['running'], to: 'succeeded' },
   error: { from: ['running'], to: 'failed' },
   violation: { from: ['running'], to: 'failed' },
+  refused: { from: ['running'], to: 'failed' },
   timeout: { from: ['waiting_user'], to: 'failed' },
   orphaned: { from: ['running'], to: 'failed' },
   declined: { from: ['waiting_user'], to: 'cancelled' },

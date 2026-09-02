@@ -155,6 +155,11 @@ function cancellationSteps(base: string): PlaybookStep[] {
         return { kind: 'done', detail: { status: await memberStatus(page), signedIn: 'already' } };
       }
       if (pathOf(page) !== '/login') return unexpectedPage(page, 'the member page');
+      if (credential === undefined) {
+        // Only an open playbook runs without one, and this is not one; the
+        // guard is here so the type says so too.
+        return { kind: 'failed', reason: 'fakegym needs a signed-in session; connect this site' };
+      }
       if (credential.kind === 'profile') {
         // The site did not recognise the profile's session. Asking the person
         // for a password is not an option; reconnecting the site is.
