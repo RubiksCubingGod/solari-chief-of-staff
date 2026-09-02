@@ -6,6 +6,7 @@ import {
   type ScriptedUserIO,
   type UserAnswerSink,
   type UserIO,
+  type UserQuestion,
 } from '@chief-of-staff/core';
 import { eq } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -107,6 +108,26 @@ function scripted(script: readonly ScriptedReply[]): (sink: UserAnswerSink) => S
   return (sink) => scriptedUserIO(sink, script);
 }
 
+/**
+ * The same person behind a channel that takes `ms` to put the question in
+ * front of them. The engine commits the question to the row and delivers it
+ * second, so a slow channel is the honest shape of the gap between
+ * `waiting_user` on the row and a question in the person's hands.
+ */
+function slowly<IO extends UserIO>(
+  makeIO: (sink: UserAnswerSink) => IO,
+  ms: number,
+): (sink: UserAnswerSink) => IO {
+  return (sink) => {
+    const io = makeIO(sink);
+    return {
+      ...io,
+      ask: (question: UserQuestion) =>
+        new Promise<void>((resolve) => setTimeout(resolve, ms)).then(() => io.ask(question)),
+    };
+  };
+}
+
 /** A mission that asks once, then finishes with whatever it was told. */
 function askOnce(question: string): Mission {
   return ({ answers }) => {
@@ -156,6 +177,22 @@ function waitForStatus(taskId: string, status: Task['status']): Promise<Task> {
   );
 }
 
+/**
+ * The question once the person has it. `waiting_user` on the row means the
+ * ledger has the question; the channel gets it a moment later, so a read of
+ * the asked list waits for delivery rather than assuming it.
+ */
+function delivered(io: ScriptedUserIO): Promise<UserQuestion> {
+  return vi.waitFor(
+    () => {
+      const [question] = io.asked;
+      if (question === undefined) throw new Error('nothing was asked yet');
+      return question;
+    },
+    { timeout: 10_000, interval: 50 },
+  );
+}
+
 async function timelineOf(taskId: string): Promise<TaskTimeline> {
   const timeline = await readTaskTimeline(database.db, taskId);
   if (timeline === undefined) throw new Error(`task ${taskId} has no timeline`);
@@ -180,20 +217,22 @@ async function enqueue(ledger: TaskLedger, taskId: string): Promise<string> {
 
 describe('the waiting_user gate behind the UserIO port', () => {
   it('hands the person the question the ledger recorded, and leaves the task parked until they speak', async () => {
-    const worker = await startWorker(scripted([{ kind: 'ignore' }]));
+    const worker = await startWorker(slowly(scripted([{ kind: 'ignore' }]), 300));
     const task = await createTask();
     const counted = counting(askOnce('What is the confirmation code?'));
     behaviours.set(task.id, counted.mission);
 
     const jobId = await enqueue(worker.ledger, task.id);
     await waitForStatus(task.id, 'waiting_user');
+    const asked = await delivered(worker.io);
     await worker.io.settled();
 
     const timeline = await timelineOf(task.id);
     const question = pendingQuestion(timeline);
     if (question === undefined) throw new Error('no pending question');
     expect(question.question).toBe('What is the confirmation code?');
-    expect(worker.io.asked).toEqual([{ taskId: task.id, userId, ...question }]);
+    expect(asked).toEqual({ taskId: task.id, userId, ...question });
+    expect(worker.io.asked).toHaveLength(1);
     expect(trail(timeline)).toEqual(['transition:started', 'ask_user', 'transition:asked']);
     expect(counted.runs()).toBe(1);
     // Parking released the worker: the job is done, and nothing is holding a
@@ -279,8 +318,7 @@ describe('the waiting_user gate behind the UserIO port', () => {
 
     await enqueue(worker.ledger, task.id);
     await waitForStatus(task.id, 'waiting_user');
-    const [question] = worker.io.asked;
-    if (question === undefined) throw new Error('nothing was asked');
+    const question = await delivered(worker.io);
     const failed = await waitForStatus(task.id, 'failed');
     expect(failed.finishedAt).not.toBeNull();
 
@@ -327,8 +365,7 @@ describe('the waiting_user gate behind the UserIO port', () => {
 
     await enqueue(worker.ledger, task.id);
     await waitForStatus(task.id, 'waiting_user');
-    const [question] = worker.io.asked;
-    if (question === undefined) throw new Error('nothing was asked');
+    const question = await delivered(worker.io);
 
     expect(
       await declineTask(database.db, randomUUID(), { questionId: question.questionId }),
