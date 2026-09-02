@@ -1,5 +1,79 @@
 # Handoff
 
+## 2026-09-02 · implementation · fakegym-cancellation
+
+**Frontier.** `fakegym-cancellation` was the last ready task; it finished at `109e0a9` (a first
+finish, `9e45bdc`, went out with a gate finding that the second reconciled). Every task in the graph
+is done and the sprint's implementation is complete; assurance was requested with
+`nah stage implementation-complete`, so hardening is the next stage. Resume with `nah implement s5`
+only if a task is reopened.
+
+**What landed.**
+
+- `packages/playbooks/src/fakegym/cancellation.ts`: `fakegymCancellation({ origin, id? })` defines
+  `cancel` on `fakegym` in four steps, `login`, `retention`, `are-you-sure`, `confirmation-code`.
+  The pure parts are exported for the rules proof: `parseSiteAnswer` (the fixture's JSON answers),
+  `describeAnswer` (failure reasons that say what the site did), `codeToTry` (the retry reply wins
+  over the first), and the two question texts `CODE_QUESTION` / `CODE_RETRY_QUESTION`.
+- `fixtures/src/fakegym.ts` mounts the shared mode state. `blocked` and `hard-blocked` wrap every
+  page the flow shows; the form POSTs still answer JSON. `redesign` gives the retention POST a
+  meaning of its own: a 302 to `http://localhost:<port>/partner/retention` before the session's
+  progress moves, plus a `GET /partner/retention` page. `FakegymControl` gains `setMode` and
+  `mode`, `FakegymSeed` extends `ModeSeed`, `FakegymState` is unchanged.
+- `fixtures/src/control-plane.integration.test.ts` and `fixtures/README.md` now state the mode-route
+  contract as "mounted where every mode has a specified meaning" (observation targets and fakegym;
+  fakedmv still has none).
+- `scripts/worker.mjs` registers the playbook at `FAKEGYM_URL` (default `http://127.0.0.1:4303`).
+- `packages/playbooks/src/fakegym.integration.test.ts`: nine cases through Postgres, pg-boss and a
+  local Chromium, the person scripted; every non-cancelling path asserts the member record afterwards.
+
+**Assumptions recorded.**
+
+1. Fakegym takes the shared hostile modes. The fixture-harness contract limited the mode route to
+   observation targets because a redesigned booking POST had no meaning; this sprint's spec requires
+   a blocked-mode path on fakegym, so the contract was extended with a specified meaning for each
+   mode rather than replanned. No outcome, seam or graph changed.
+2. The blocked-mode proof uses `hard-blocked`: the bare shell makes the login step fail with
+   `fakegym is showing its blocked shell`. Soft `blocked` is materialised by a real browser and the
+   flow passes; that is recorded as a case too, so the distinction is visible.
+3. The allowlist violation is the redesign's partner redirect, a server 302 off the host on the
+   retention POST. The guard refuses it before the fixture advances progress, so the membership and
+   the session are untouched and the trail ends in `transition:violation` without a retention step.
+4. "Declined" is the person declining the confirmation-code question through UserIO: the task ends
+   `cancelled` with `transition:declined`. No reply text such as "stop" is parsed.
+5. A wrong code gets exactly one retry, asked with `CODE_RETRY_QUESTION`; a second refusal fails the
+   task naming both. The proof's wrong codes can never match the fixture's `GYM-nnnnnn` shape.
+6. A profile credential the site does not honour fails with `fakegym asked for a full sign-in;
+   reconnect this site`. The local provider carries no profile, so today this is the path every
+   connection-sourced run takes; passwords come only from the proof's credential source.
+7. Steps re-run from the top on resume. The site keeps progress per session, so signing in again and
+   walking through again is the only route back to the gate; `/cancel/confirm` stays idempotent once
+   the membership is cancelled.
+8. The blocked-shell marker is a literal in the playbook rather than an import of the fixtures
+   package into production code.
+
+**Findings.** The fixture control-plane contract test failed on the mode route once fakegym mounted
+it, as expected; resolved by assumption 1. The first `nah task finish` gate (commit `9e45bdc`) found
+one more: the dev-entrypoint test holds the README's per-fixture route table to exactly what each
+fixture mounts, and fakegym's table lacked `GET /__test/mode`, `POST /__test/mode` and
+`GET /partner/retention`. The table was completed and the task finished again to reconcile the gate
+in place. Nothing else surfaced.
+
+**Receipts.** `gym-red` verified before the playbook existed (import failure signature matched);
+`gym-green` verified after one assertion fix (the echo names the provider `local`): 9 passed; `gym-rules` verified: 17 passed; `gym-gate` by `nah task finish`.
+
+**Handed to hardening.** `nah stage implementation-complete` (request `hardening-he358849b81584114`,
+08:10 UTC) refreshed the sprint's stale evidence before requesting assurance. `task-lifecycle-green`
+was re-run and failed for an environmental reason: no test database could be started (no container
+runtime, and the embedded Postgres cluster did not start), two minutes after the same file passed
+inside the full gate at `109e0a9`. `userio-green`, `guardrails-green` and `runner-green` are stale
+because a covered file changed after their receipts (`task-ledger.ts`, `guardrails.ts`, the
+playbooks `index.ts`), and the per-task gate receipts are stale for the same reason, while the gate
+command itself passed in full on the final tree. The transition accepted these as non-blocking
+findings. `nah verify` now refuses to refresh any of them because the implementation attempt is
+terminal, so the refresh is hardening's first job: `nah harden s5`. The transition was cut off by a
+two-minute tool timeout after recording its events, so its ledger delta was committed by hand.
+
 ## 2026-09-02 · implementation · playbook-runner
 
 ### Where the frontier is
@@ -293,6 +367,20 @@
 - Root blockers: none
 - Done: 4/6
 - Receipts: verification-completed-eventc75e501c0b9844b68b468c29ec17058f, verification-completed-event95b4de8e04a649ba9bc73a37d079a346, verification-completed-eventa20f3fd88c57419d85f34c6fe29fd100, verification-completed-event3cc439ae178d481b9d6c6c5f86365f90, verification-completed-event9711a9c6a8a24baa903d024f4fb5e8a1, verification-completed-event1cc6f970db55419ca8abf720f56b120c, verification-completed-eventa518e31cece447b8a31ca3508624eaf4, verification-completed-eventc2f3eea1a9154ec2b4035f7a0e6da3f3, verification-completed-event29a9ff284177409b887b886fcb30b45d, verification-completed-event6e7d9ec0a1e1454ab19e3c53d1c3d8bc, verification-completed-evente3356b555da844b3ac5f4b45bf5710c9, verification-completed-evente57fb0d0a41c4c77a15b68521e6a3f8e, verification-completed-event7cf1724816d74496adf34ab1a48f819f, verification-completed-eventaaaa3ad07a8f4c4aa2ccec9625b278d9, verification-completed-eventc68bfc15559148bf9992112ae606639e, verification-completed-event9891a8d6f6eb48e3b74c763f560d2655, verification-completed-eventb500cbd155b54d6696a868fe7638feeb, verification-completed-eventf3e221d2f0e741bfacedf8a3674f0e20, verification-completed-event69d176706a374cf7aab88b679a33e3d4, verification-completed-event305fdba82cc74e71967012507eed15b7, verification-completed-eventde429ae98e734f9eadf12c87802f7dc3
+- Findings: none
+- Assurance request: none
+- Knowledge revisions: none
+- Resume: `nah implement s5`
+
+<!-- nah-checkpoint:e0bb8df39782a88e -->
+## 2026-09-02T07:38:56.877Z · claude-code · 8054cf2e-8aef-4bfd-8b27-56afcffb8a6f
+
+- Stage: implementation
+- Ready: none
+- In progress: fakegym-cancellation
+- Root blockers: none
+- Done: 5/6
+- Receipts: verification-completed-eventc75e501c0b9844b68b468c29ec17058f, verification-completed-event95b4de8e04a649ba9bc73a37d079a346, verification-completed-eventa20f3fd88c57419d85f34c6fe29fd100, verification-completed-event3cc439ae178d481b9d6c6c5f86365f90, verification-completed-event9711a9c6a8a24baa903d024f4fb5e8a1, verification-completed-event1cc6f970db55419ca8abf720f56b120c, verification-completed-eventa518e31cece447b8a31ca3508624eaf4, verification-completed-eventc2f3eea1a9154ec2b4035f7a0e6da3f3, verification-completed-event29a9ff284177409b887b886fcb30b45d, verification-completed-event6e7d9ec0a1e1454ab19e3c53d1c3d8bc, verification-completed-evente3356b555da844b3ac5f4b45bf5710c9, verification-completed-evente57fb0d0a41c4c77a15b68521e6a3f8e, verification-completed-event7cf1724816d74496adf34ab1a48f819f, verification-completed-eventaaaa3ad07a8f4c4aa2ccec9625b278d9, verification-completed-eventc68bfc15559148bf9992112ae606639e, verification-completed-event9891a8d6f6eb48e3b74c763f560d2655, verification-completed-eventb500cbd155b54d6696a868fe7638feeb, verification-completed-eventf3e221d2f0e741bfacedf8a3674f0e20, verification-completed-event69d176706a374cf7aab88b679a33e3d4, verification-completed-event305fdba82cc74e71967012507eed15b7, verification-completed-eventde429ae98e734f9eadf12c87802f7dc3, verification-completed-event223b8d0d7b4949d996a010e8b61482d1, verification-completed-event426d9ce3b90641f1bde8f1529f1b94de, verification-completed-event6ac21023b6a743198443333e2476f2a2, verification-completed-event0d0efaa5227e4017bd6749e082f57749
 - Findings: none
 - Assurance request: none
 - Knowledge revisions: none
