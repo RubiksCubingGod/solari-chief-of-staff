@@ -527,3 +527,12 @@ export async function recordBrowserSession(
   };
   await appendWithin(db, taskId, 'step', payload);
 }
+
+/**
+ * Writes which playbook a task went to. Written as soon as the playbook is
+ * chosen, before the connection is read, so a task refused after that still
+ * says which playbook refused it.
+ */
+export async function recordPlaybook(db: TaskDatabase, taskId: string, playbookId: string): Promise<void> {
+  await db.update(tasks).set({ playbookId }).where(eq(tasks.id, taskId));
+}

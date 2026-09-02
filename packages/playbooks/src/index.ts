@@ -10,3 +10,4 @@
 export const MODULE_ID = '@chief-of-staff/playbooks' as const;
 
 export * from './guardrails/index.js';
+export * from './runner/index.js';

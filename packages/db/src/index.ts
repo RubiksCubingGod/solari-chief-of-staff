@@ -43,6 +43,7 @@ export {
   pendingQuestion,
   readTaskTimeline,
   recordBrowserSession,
+  recordPlaybook,
   transitionTask,
   type AnswerOutcome,
   type AskOutcome,
@@ -61,5 +62,6 @@ export {
   type TransitionOutcome,
   type TransitionRequest,
 } from './task-ledger.js';
-export { createUserAnswerSink } from './user-io.js';
+export { readSiteConnection } from './site-connections.js';
+export { createLogUserIO, createUserAnswerSink, type QuestionLogSink } from './user-io.js';
 export { startWorker, type WorkerProcess } from './worker.js';

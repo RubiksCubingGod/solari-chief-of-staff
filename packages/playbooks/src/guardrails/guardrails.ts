@@ -460,16 +460,18 @@ type Settled<T> =
  * Runs `body` on a fresh page of a guarded session. A stop wins over whatever
  * the body was doing: the session is released under it, its pending calls
  * fail quietly, and the stop is what comes back. A body that finishes first
- * returns its value; one that throws first throws.
+ * returns its value; one that throws first throws. The guard is handed to
+ * the body too, so a body that does several things in turn can see a stop
+ * between them rather than start the next thing on a released session.
  */
 export async function runGuarded<T>(
   session: BrowserSession,
   policy: GuardrailPolicy,
-  body: (page: Page) => Promise<T>,
+  body: (page: Page, guard: Guardrails) => Promise<T>,
 ): Promise<GuardedOutcome<T>> {
   const guard = await installGuardrails(session.context, policy);
   const page = await session.newPage();
-  const run: Promise<Settled<T>> = body(page).then(
+  const run: Promise<Settled<T>> = body(page, guard).then(
     (value) => ({ kind: 'value', value }),
     (error: unknown) => ({ kind: 'threw', error }),
   );
@@ -513,7 +515,7 @@ export interface GuardedRun<T> {
  */
 export async function guardedSession<T>(
   options: GuardedSessionOptions,
-  body: (page: Page, session: SessionEcho) => Promise<T>,
+  body: (page: Page, session: SessionEcho, guard: Guardrails) => Promise<T>,
 ): Promise<GuardedRun<T>> {
   return withBrowser(options.provider, guardedRequest(options.request), async (session) => {
     const echo: SessionEcho = {
@@ -521,7 +523,7 @@ export async function guardedSession<T>(
       sessionId: session.meta.sessionId,
       recording: session.meta.recording,
     };
-    const outcome = await runGuarded(session, options.policy, (page) => body(page, echo));
+    const outcome = await runGuarded(session, options.policy, (page, guard) => body(page, echo, guard));
     return { outcome, session: echo };
   });
 }

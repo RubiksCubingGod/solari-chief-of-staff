@@ -1,5 +1,45 @@
 # Handoff
 
+## 2026-09-02 · implementation · playbook-runner
+
+### Where the frontier is
+
+`playbook-runner` proven and being finished: RED, GREEN and rules receipts recorded, `nah task finish` run with the exact files. Next ready: `fakegym-cancellation` (gated only on this task). `replay-embed-page` finished at `0442d77` after the player's typing fix; its gate went green on the re-run.
+
+### What landed
+
+- `packages/playbooks/src/runner/playbook.ts`: the playbook vocabulary. `SiteCredential` (a Solari profile, or a username and password for a fixture's form), `PlaybookContext` (task, input as a record, connection, credential, answers, `answerTo`), `StepOutcome` (`done` | `ask` | `failed`), `PlaybookStep`, `Playbook`, and `definePlaybook`, which derives the connection domain and the allowlist's first host from the origin and refuses a definition with no site, no steps, a non-URL origin, or duplicate or blank step names.
+- `packages/playbooks/src/runner/registry.ts`: `createPlaybookRegistry` keyed by `<action>@<site>`, refusing two claims on one pair by naming both playbooks.
+- `packages/playbooks/src/runner/runner.ts`: `choosePlaybook` (every refusal a sentence, none of them having opened a browser), `answerTo` (latest exact-match reply), `runSteps` (each outcome on the trail before the next step; a guard stop wins over the step and over the trail), `profileCredentials`, and `createPlaybookMission`, which records the playbook id on the row, reads the site connection, gets the credential, opens one guarded session with the profile asked for, records the session before any step, and returns the state machine's own outcomes.
+- `packages/playbooks/src/guardrails/guardrails.ts`: `runGuarded` and `guardedSession` hand the `Guardrails` object to the body as a trailing argument, so a body that does several things in turn can see a stop between them. Additive; the guardrails proofs are unchanged.
+- `packages/db/src/site-connections.ts` (`readSiteConnection`), `task-ledger.ts` (`recordPlaybook`), `user-io.ts` (`createLogUserIO`: one JSON line per question on stdout, kind first), all exported from the db entry point.
+- `scripts/worker.mjs`: builds `packages/playbooks` alongside `packages/watch`, registers the task engine with an empty registry and the log UserIO next to the watch engine.
+- Proofs: `packages/playbooks/src/runner.integration.test.ts` (the composed proof on a toy site: success order and result, ask → park with the session released → resume in a fresh session, decline, failing step, throwing step, allowlist violation before the site sees the request, seven refusals before any browser opens, the connection's profile reaching a step), unit tests for the registry, the runner's pure parts, and the question log.
+
+### Assumptions
+
+- Credentials come from the connection's Solari profile in production (`profileCredentials`, the default); the proofs pass a `CredentialSource` that yields the fixture's password from the test itself. Nothing password-shaped is read from or written to the database, as ARCHITECTURE requires.
+- Every refusal (mode, input shape, unknown site or action, missing or expired connection, missing credential) happens before a session is acquired, so a refused task has no `browser_session` step and no `solari_session_id`. The playbook id is written as soon as it is chosen, so a task refused on its connection still says which playbook refused it.
+- A guard stop is the mission's outcome, not the step's: once the guard has stopped, the step under it is not written to the trail, and nothing after it runs. The trail for a violation reads `started, browser_session, <steps before>, violation`.
+- Steps run from the top on every invocation, including the resumed one: a step that already happened on the site must be at peace with finding it done. The toy proof logs in twice for the ask path.
+- The worker registers an empty registry until the fakegym playbook lands, so today every playbook-mode task on `pnpm worker` is refused with `no playbook for <kind> on <site>`; questions go to stdout as `{"kind":"ask_user",...}` lines until a delivery channel exists. Enqueueing tasks the API created stays with the reconcile sweep.
+- `PlaybookContext.answerTo` is a property, not a method, so a step may destructure it (the lint's `unbound-method` rule).
+
+### Findings
+
+- none red. The only round-trip was lint: destructuring `answerTo` out of the context tripped `unbound-method`; fixed by declaring it as a property.
+
+### Receipts
+
+- `runner-red`: verified; the composed proof failed at the import with `Cannot find module './runner/index.js'`.
+- `runner-green`: verified; 15 passed on the toy site through a local Chromium.
+- `runner-rules`: verified; 32 passed across the registry, runner, question-log and entry-point suites.
+- `runner-gate`: by `nah task finish`.
+
+### Resume
+
+`nah implement s5`
+
 ## 2026-09-02 · implementation · replay-embed-page
 
 ### Where the frontier is
@@ -239,6 +279,20 @@
 - Root blockers: none
 - Done: 3/6
 - Receipts: verification-completed-eventc75e501c0b9844b68b468c29ec17058f, verification-completed-event95b4de8e04a649ba9bc73a37d079a346, verification-completed-eventa20f3fd88c57419d85f34c6fe29fd100, verification-completed-event3cc439ae178d481b9d6c6c5f86365f90, verification-completed-event9711a9c6a8a24baa903d024f4fb5e8a1, verification-completed-event1cc6f970db55419ca8abf720f56b120c, verification-completed-eventa518e31cece447b8a31ca3508624eaf4, verification-completed-eventc2f3eea1a9154ec2b4035f7a0e6da3f3, verification-completed-event29a9ff284177409b887b886fcb30b45d, verification-completed-event6e7d9ec0a1e1454ab19e3c53d1c3d8bc, verification-completed-evente3356b555da844b3ac5f4b45bf5710c9, verification-completed-evente57fb0d0a41c4c77a15b68521e6a3f8e, verification-completed-event7cf1724816d74496adf34ab1a48f819f, verification-completed-eventaaaa3ad07a8f4c4aa2ccec9625b278d9, verification-completed-eventc68bfc15559148bf9992112ae606639e, verification-completed-event9891a8d6f6eb48e3b74c763f560d2655
+- Findings: none
+- Assurance request: none
+- Knowledge revisions: none
+- Resume: `nah implement s5`
+
+<!-- nah-checkpoint:b4c2ca3a3d1a279c -->
+## 2026-09-02T07:16:11.245Z · claude-code · 8054cf2e-8aef-4bfd-8b27-56afcffb8a6f
+
+- Stage: implementation
+- Ready: playbook-runner
+- In progress: none
+- Root blockers: none
+- Done: 4/6
+- Receipts: verification-completed-eventc75e501c0b9844b68b468c29ec17058f, verification-completed-event95b4de8e04a649ba9bc73a37d079a346, verification-completed-eventa20f3fd88c57419d85f34c6fe29fd100, verification-completed-event3cc439ae178d481b9d6c6c5f86365f90, verification-completed-event9711a9c6a8a24baa903d024f4fb5e8a1, verification-completed-event1cc6f970db55419ca8abf720f56b120c, verification-completed-eventa518e31cece447b8a31ca3508624eaf4, verification-completed-eventc2f3eea1a9154ec2b4035f7a0e6da3f3, verification-completed-event29a9ff284177409b887b886fcb30b45d, verification-completed-event6e7d9ec0a1e1454ab19e3c53d1c3d8bc, verification-completed-evente3356b555da844b3ac5f4b45bf5710c9, verification-completed-evente57fb0d0a41c4c77a15b68521e6a3f8e, verification-completed-event7cf1724816d74496adf34ab1a48f819f, verification-completed-eventaaaa3ad07a8f4c4aa2ccec9625b278d9, verification-completed-eventc68bfc15559148bf9992112ae606639e, verification-completed-event9891a8d6f6eb48e3b74c763f560d2655, verification-completed-eventb500cbd155b54d6696a868fe7638feeb, verification-completed-eventf3e221d2f0e741bfacedf8a3674f0e20, verification-completed-event69d176706a374cf7aab88b679a33e3d4, verification-completed-event305fdba82cc74e71967012507eed15b7, verification-completed-eventde429ae98e734f9eadf12c87802f7dc3
 - Findings: none
 - Assurance request: none
 - Knowledge revisions: none
