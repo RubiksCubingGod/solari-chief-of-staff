@@ -85,16 +85,9 @@ export type MessageChannel = (typeof MESSAGE_CHANNELS)[number];
 export const DELIVERY_STATUSES = ['pending', 'sent', 'failed'] as const;
 export type DeliveryStatus = (typeof DELIVERY_STATUSES)[number];
 
-/**
- * Builds a type guard over a closed string list. Used instead of hand-written
- * guards so adding a member to a list cannot leave a stale guard behind.
- */
-export function memberGuard<T extends string>(
-  values: readonly T[],
-): (value: unknown) => value is T {
-  const allowed: ReadonlySet<string> = new Set(values);
-  return (value: unknown): value is T => typeof value === 'string' && allowed.has(value);
-}
+import { memberGuard } from './vocabulary.js';
+
+export { memberGuard };
 
 export const isWatchKind = memberGuard(WATCH_KINDS);
 export const isTaskKind = memberGuard(TASK_KINDS);
@@ -119,6 +112,7 @@ export {
   normalizeBindingCode,
 } from './binding-code.js';
 
+export * from './calendar/index.js';
 export * from './task-lifecycle.js';
 export * from './user-io.js';
 export * from './watch/index.js';

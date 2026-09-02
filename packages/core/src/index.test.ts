@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  CALENDAR_ANNOTATIONS,
+  CALENDAR_AUTO_CANCEL_STATES,
   CALENDAR_ITEM_KINDS,
   CALENDAR_ITEM_STATUSES,
+  CALENDAR_REMINDER_STATES,
   DELIVERY_STATUSES,
   FETCH_TIERS,
   MESSAGE_CHANNELS,
@@ -16,8 +19,11 @@ import {
   WATCH_HEALTH_STATES,
   WATCH_KINDS,
   WATCH_STATUSES,
+  isCalendarAnnotation,
+  isCalendarAutoCancelState,
   isCalendarItemKind,
   isCalendarItemStatus,
+  isCalendarReminderState,
   isDeliveryStatus,
   isFetchTier,
   isMessageChannel,
@@ -73,6 +79,17 @@ describe('domain vocabulary', () => {
     { name: 'MESSAGE_DIRECTIONS', values: MESSAGE_DIRECTIONS, guard: isMessageDirection },
     { name: 'MESSAGE_CHANNELS', values: MESSAGE_CHANNELS, guard: isMessageChannel },
     { name: 'DELIVERY_STATUSES', values: DELIVERY_STATUSES, guard: isDeliveryStatus },
+    { name: 'CALENDAR_ANNOTATIONS', values: CALENDAR_ANNOTATIONS, guard: isCalendarAnnotation },
+    {
+      name: 'CALENDAR_REMINDER_STATES',
+      values: CALENDAR_REMINDER_STATES,
+      guard: isCalendarReminderState,
+    },
+    {
+      name: 'CALENDAR_AUTO_CANCEL_STATES',
+      values: CALENDAR_AUTO_CANCEL_STATES,
+      guard: isCalendarAutoCancelState,
+    },
   ] as const satisfies readonly {
     name: string;
     values: readonly string[];

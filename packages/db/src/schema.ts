@@ -1,6 +1,9 @@
 import {
+  CALENDAR_ANNOTATIONS,
+  CALENDAR_AUTO_CANCEL_STATES,
   CALENDAR_ITEM_KINDS,
   CALENDAR_ITEM_STATUSES,
+  CALENDAR_REMINDER_STATES,
   DELIVERY_STATUSES,
   FETCH_TIERS,
   MESSAGE_CHANNELS,
@@ -51,6 +54,12 @@ export const calendarItemStatus = pgEnum('calendar_item_status', CALENDAR_ITEM_S
 export const messageDirection = pgEnum('message_direction', MESSAGE_DIRECTIONS);
 export const messageChannel = pgEnum('message_channel', MESSAGE_CHANNELS);
 export const deliveryStatus = pgEnum('delivery_status', DELIVERY_STATUSES);
+export const calendarAnnotation = pgEnum('calendar_annotation', CALENDAR_ANNOTATIONS);
+export const calendarReminderState = pgEnum('calendar_reminder_state', CALENDAR_REMINDER_STATES);
+export const calendarAutoCancelState = pgEnum(
+  'calendar_auto_cancel_state',
+  CALENDAR_AUTO_CANCEL_STATES,
+);
 
 const primaryKeyColumn = () => uuid('id').primaryKey().defaultRandom();
 const timestampColumn = (name: string) => timestamp(name, { withTimezone: true });
@@ -205,6 +214,20 @@ export const calendarItems = pgTable(
     cancelBy: date('cancel_by'),
     action: jsonb('action'),
     status: calendarItemStatus('status').notNull().default('active'),
+    // How many days before the date the reminder goes out. Three by default:
+    // enough notice to act on, not so much that it is forgotten again.
+    reminderLeadDays: integer('reminder_lead_days').notNull().default(3),
+    // Whether the renewal should enqueue a cancellation task - behind a
+    // confirm question, never on its own - and how many days ahead of the
+    // renewal that happens. Off by default: this is the one setting that can
+    // end a subscription, so a person has to choose it.
+    autoCancel: boolean('auto_cancel').notNull().default(false),
+    autoCancelLeadDays: integer('auto_cancel_lead_days').notNull().default(3),
+    // The mark an engine left, if any (`@chief-of-staff/core` ranks them), with
+    // its reason in words and when. Null until something happens to the entry.
+    annotation: calendarAnnotation('annotation'),
+    annotationNote: text('annotation_note'),
+    annotatedAt: timestampColumn('annotated_at'),
   },
   (table) => [index('calendar_items_user_id_idx').on(table.userId)],
 );
@@ -336,6 +359,55 @@ export const deliveries = pgTable(
   (table) => [index('deliveries_user_id_created_at_idx').on(table.userId, table.createdAt)],
 );
 
+/**
+ * One row per reminder owed: the entry and the day it was first due. Written
+ * `pending` before the send, so a scan that dies mid-send leaves a row saying
+ * a reminder was owed; the next scan finds it and settles it. The unique key is
+ * the idempotence: a re-run of the same scan cannot record the reminder twice,
+ * and a late send is the same row, not a new one.
+ */
+export const calendarReminders = pgTable(
+  'calendar_reminders',
+  {
+    id: primaryKeyColumn(),
+    itemId: uuid('item_id')
+      .notNull()
+      .references(() => calendarItems.id, { onDelete: 'cascade' }),
+    dueOn: date('due_on').notNull(),
+    state: calendarReminderState('state').notNull().default('pending'),
+    attempts: integer('attempts').notNull().default(0),
+    error: text('error'),
+    // The outbound row the send became, when it got as far as one.
+    deliveryId: uuid('delivery_id').references(() => deliveries.id, { onDelete: 'set null' }),
+    createdAt: timestampColumn('created_at').notNull().defaultNow(),
+    settledAt: timestampColumn('settled_at'),
+  },
+  (table) => [uniqueIndex('calendar_reminders_item_id_due_on_key').on(table.itemId, table.dueOn)],
+);
+
+/**
+ * One row per auto-cancel decision: the entry and the renewal it was meant to
+ * beat. The unique key is what makes "enqueue once per renewal date" true
+ * across re-runs; the task is kept by reference so the trail survives the task
+ * being deleted, and the record survives being unlinked.
+ */
+export const calendarAutoCancels = pgTable(
+  'calendar_auto_cancels',
+  {
+    id: primaryKeyColumn(),
+    itemId: uuid('item_id')
+      .notNull()
+      .references(() => calendarItems.id, { onDelete: 'cascade' }),
+    renewOn: date('renew_on').notNull(),
+    state: calendarAutoCancelState('state').notNull(),
+    taskId: uuid('task_id').references(() => tasks.id, { onDelete: 'set null' }),
+    createdAt: timestampColumn('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('calendar_auto_cancels_item_id_renew_on_key').on(table.itemId, table.renewOn),
+  ],
+);
+
 export const SCHEMA_TABLE_NAMES = [
   'users',
   'site_connections',
@@ -348,6 +420,8 @@ export const SCHEMA_TABLE_NAMES = [
   'binding_codes',
   'login_tokens',
   'deliveries',
+  'calendar_reminders',
+  'calendar_auto_cancels',
 ] as const;
 
 export type User = typeof users.$inferSelect;
@@ -372,3 +446,7 @@ export type LoginToken = typeof loginTokens.$inferSelect;
 export type NewLoginToken = typeof loginTokens.$inferInsert;
 export type Delivery = typeof deliveries.$inferSelect;
 export type NewDelivery = typeof deliveries.$inferInsert;
+export type CalendarReminder = typeof calendarReminders.$inferSelect;
+export type NewCalendarReminder = typeof calendarReminders.$inferInsert;
+export type CalendarAutoCancel = typeof calendarAutoCancels.$inferSelect;
+export type NewCalendarAutoCancel = typeof calendarAutoCancels.$inferInsert;

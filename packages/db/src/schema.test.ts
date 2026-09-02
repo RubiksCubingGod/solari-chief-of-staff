@@ -5,7 +5,9 @@ import { describe, expect, it } from 'vitest';
 import {
   SCHEMA_TABLE_NAMES,
   bindingCodes,
+  calendarAutoCancels,
   calendarItems,
+  calendarReminders,
   deliveries,
   loginTokens,
   messages,
@@ -29,6 +31,8 @@ const TABLES: PgTable[] = [
   bindingCodes,
   loginTokens,
   deliveries,
+  calendarReminders,
+  calendarAutoCancels,
 ];
 
 interface ForeignKeyShape {
@@ -97,6 +101,45 @@ describe('the section 5 schema', () => {
     expect(foreignKeys(taskEvents)).toEqual([
       { columns: ['task_id'], onDelete: 'cascade', references: 'tasks' },
     ]);
+  });
+
+  it('takes an entry’s reminders and auto-cancel records with it, but keeps them when the task or delivery goes', () => {
+    expect(foreignKeys(calendarReminders)).toEqual([
+      { columns: ['delivery_id'], onDelete: 'set null', references: 'deliveries' },
+      { columns: ['item_id'], onDelete: 'cascade', references: 'calendar_items' },
+    ]);
+    expect(foreignKeys(calendarAutoCancels)).toEqual([
+      { columns: ['item_id'], onDelete: 'cascade', references: 'calendar_items' },
+      { columns: ['task_id'], onDelete: 'set null', references: 'tasks' },
+    ]);
+  });
+
+  it('keys one reminder per entry and day and one auto-cancel per entry and renewal', () => {
+    for (const [table, name, columns] of [
+      [calendarReminders, 'calendar_reminders_item_id_due_on_key', ['item_id', 'due_on']],
+      [calendarAutoCancels, 'calendar_auto_cancels_item_id_renew_on_key', ['item_id', 'renew_on']],
+    ] as const) {
+      expect(indexedColumns(table)).toEqual({ [name]: columns });
+      // Unique, or the key would be a hint rather than the idempotence it is
+      // there to be: two scans could each record the same reminder.
+      expect(getTableConfig(table).indexes.map((index) => index.config.unique)).toEqual([true]);
+    }
+  });
+
+  it('gives an entry its reminder settings, off the safe end of each', () => {
+    const columns = Object.fromEntries(
+      getTableConfig(calendarItems).columns.map((column) => [column.name, column]),
+    );
+
+    expect(columns['reminder_lead_days']?.default).toBe(3);
+    // Off by default: the one setting that can end a subscription is chosen,
+    // never inherited.
+    expect(columns['auto_cancel']?.default).toBe(false);
+    expect(columns['auto_cancel_lead_days']?.default).toBe(3);
+    // Unmarked until an engine marks it; the note and time travel with the mark.
+    expect(columns['annotation']?.notNull).toBe(false);
+    expect(columns['annotation_note']?.notNull).toBe(false);
+    expect(columns['annotated_at']?.notNull).toBe(false);
   });
 
   it('keeps a transcript row after the task or watch it answered is gone', () => {

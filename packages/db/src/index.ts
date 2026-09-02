@@ -1,3 +1,14 @@
+export {
+  annotateCalendarItem,
+  recordAutoCancel,
+  recordReminder,
+  type AnnotateOptions,
+  type AnnotateOutcome,
+  type AutoCancelDecision,
+  type AutoCancelRecord,
+  type CalendarDatabase,
+  type ReminderRecord,
+} from './calendar-ledger.js';
 export { createDatabase, logPoolError, type Database } from './client.js';
 export {
   DEFAULT_RETRY_POLICY,
