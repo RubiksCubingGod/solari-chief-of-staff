@@ -3,6 +3,10 @@ import { headers } from 'next/headers';
 import { createApiClient, sessionCookieCredential } from '../../api-client';
 import { loadWebConfig } from '../../config';
 import { Sparkline } from '../../watches/sparkline';
+import {
+  describePauseOutcome,
+  PAUSE_OUTCOME_PARAMETER,
+} from '../../watches/pause-outcome';
 import { loadWatchesView, type WatchRow } from '../../watches/view-model';
 
 /**
@@ -16,7 +20,16 @@ import { loadWatchesView, type WatchRow } from '../../watches/view-model';
  */
 export const dynamic = 'force-dynamic';
 
-export default async function WatchesPage() {
+export default async function WatchesPage({
+  searchParams,
+}: {
+  readonly searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  // What the pause control learned on the way here, if it was pressed and did
+  // not work. A token, resolved to one of this dashboard's own sentences -
+  // `pause-outcome.ts` has the argument for why the wire does not carry prose.
+  const pauseFailure = describePauseOutcome((await searchParams)[PAUSE_OUTCOME_PARAMETER]);
+
   // The browser's own cookie, forwarded unread. The middleware has already
   // refused anyone who does not have one; this is how the API is told which
   // account the page is being drawn for.
@@ -31,6 +44,13 @@ export default async function WatchesPage() {
   return (
     <section>
       <h1>Watches</h1>
+      {pauseFailure === undefined ? null : (
+        // First, because it is about the thing the reader just did. During an
+        // outage the banner below appears too, and the two say different
+        // things: this one that the change did not happen, that one that the
+        // rows underneath could not be re-read to show it either way.
+        <p role="alert">{pauseFailure}</p>
+      )}
       {view.error === undefined ? null : (
         // A refusal is content, not a blank screen: the reader is told the
         // rows could not be fetched rather than being shown a page that looks

@@ -235,6 +235,40 @@ describe('the watches page', () => {
   );
 
   it(
+    'says a refused pause did not happen, rather than answering with a 500',
+    async () =>
+      withPage(async (page) => {
+        await openWatchesAs(page, watcher.email);
+
+        const card = cardFor(page, PAUSEABLE);
+        // A watch this account does not own, so the API answers the write the
+        // way it answers any stranger's row: as one that does not exist. Sent by
+        // editing the form rather than by stopping the API, because the page has
+        // to have been drawn for there to be a button here to press - which is
+        // also the shape of the real case, a reader holding a page from before.
+        const somebodyElses = stranger.watches[0]?.id;
+        expect(somebodyElses, 'the stranger fixture seeded no watch').toBeDefined();
+        await card.locator('input[name="id"]').evaluate((input, id) => {
+          (input as HTMLInputElement).value = id;
+        }, somebodyElses ?? '');
+
+        await card.getByRole('button', { name: `Pause ${PAUSEABLE}` }).click();
+        // Unguarded this was Next's default 500, on the one control the page
+        // offers, with nothing on it to say what happened.
+        await page.waitForURL(/\/watches\?pause=failed$/u);
+
+        const main = page.locator('main');
+        const rendered = (await main.textContent()) ?? '';
+        expect(rendered, rendered).toContain('could not be changed');
+        expect(await main.getByRole('alert').count()).toBeGreaterThan(0);
+        // And the list is still the reader's own, re-read from the API, with the
+        // row they pressed on left exactly as the API still has it.
+        expect(await cardFor(page, PAUSEABLE).textContent()).toContain('active');
+      }),
+    240_000,
+  );
+
+  it(
     'gives an account with no watches the empty state rather than a blank page',
     async () =>
       withPage(async (page) => {
