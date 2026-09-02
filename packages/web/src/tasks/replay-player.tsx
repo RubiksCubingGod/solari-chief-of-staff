@@ -31,6 +31,16 @@ interface Mounted {
   $destroy(): void;
 }
 
+/**
+ * rrweb-player is a Svelte 4 component and its typings extend Svelte's, which
+ * the dashboard does not install: the compiled player carries its own runtime.
+ * To the type checker the class is therefore only its own getters, so the
+ * tear-down method is checked on the instance rather than assumed.
+ */
+function isMounted(player: object): player is Mounted {
+  return '$destroy' in player && typeof player.$destroy === 'function';
+}
+
 export function ReplayPlayer({ src }: ReplayPlayerProps) {
   const target = useRef<HTMLDivElement>(null);
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
@@ -50,10 +60,11 @@ export function ReplayPlayer({ src }: ReplayPlayerProps) {
       // and most pages never need it.
       const { default: Player } = await import('rrweb-player');
       if (cancelled || target.current === null) return;
-      mounted = new Player({
+      const player = new Player({
         target: target.current,
         props: { events, autoPlay: true, showController: true, width: 960, height: 540 },
       });
+      mounted = isMounted(player) ? player : undefined;
       setPhase({ kind: 'playing' });
     }
 

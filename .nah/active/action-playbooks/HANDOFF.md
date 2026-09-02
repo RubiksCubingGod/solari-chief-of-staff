@@ -5,7 +5,7 @@
 ### Where the frontier is
 
 - `guardrails` done at `a4c6123`.
-- `replay-embed-page` implemented and proven (API integration 7/7, browser e2e 6/6, unit suites 47/47, lint clean, typecheck clean); closing with `nah task finish`.
+- `replay-embed-page` done at `ee41ba3` with findings: the gate's `build:web` step was red on the player's typing (below), fixed and the finish re-run right after.
 - Next ready: `playbook-runner` (needs `userio-gate` and `guardrails`, both done), then `fakegym-cancellation`.
 
 ### What landed
@@ -30,6 +30,7 @@
 
 ### Findings
 
+- **The gate was red on `next build`'s type pass**, not on any test: `replay-player.tsx` assigned the rrweb-player instance to a type with `$destroy`, and the player's typings extend Svelte's `SvelteComponent`, which the dashboard does not install (rrweb-player bundles its runtime and lists Svelte only as a dev dependency). An unresolved base class types as `any`, so the class was only its own getters. Fixed by checking `$destroy` on the instance (`isMounted`) instead of assuming it; `tsc -p packages/web` and lint clean; the finish re-run records the gate again. The unit and browser proofs could not see this because neither type-checks the `.tsx`.
 - The first GREEN round failed three ways, all of them implementation feedback rather than test defects: (1) the API answered 500 for the store failure because the app error handler collapsed every 5xx to `internal_error`; it now keeps the code and words of an `HttpError` a handler raised itself (`packages/api/src/app.ts`, `app.test.ts` unchanged and green). (2) `getByRole('alert')` in the dev server's page also matches the empty live region of the Next dev overlay (shadow DOM is pierced), so the failure alerts are located with `hasText: /recording/`. (3) The scrub clicked `page.mouse` at the progress bar's bounding box, which sits below the 720 px viewport under the facts and the 540 px frame; the click now goes through the locator, which scrolls the bar into view first. A standalone probe of `rrweb-player` (autoplay to the end, click at 2 %, click at 98 %) established the expected DOM states before the fix.
 - The e2e RED failed in 26 s at the dashboard's 404 (`expected 404 to be 200`), as declared; the API suite failed on the missing `events`/`recording` fields and the missing route.
 - Sibling uncommitted work sat in the tree during RED and GREEN (`packages/agent/*`, `packages/watch/*`, `scripts/worker.mjs`, `tests/process-entry-points.integration.test.ts`, `.env.example`, `README.md`); none of it was touched. Both siblings committed before the gate (`2a6462f` dashboard-read, `a82c91f` watch-engine), so only their NAH ledgers remain uncommitted and are left alone.
