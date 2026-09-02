@@ -796,3 +796,281 @@ directories that appear and vanish while tests run.** A tree walk that does not 
 not flaky in the usual sense; it is reading a directory whose lifetime is another suite's test
 body. `eslint.config.js` and the `tsconfig` globs already exclude it, which is why lint and both
 typechecks never saw this.
+
+
+## Hardening round one: the gate is red, and not for this sprint's reasons
+
+`nah stage implementation-complete` finally landed at 06:04 on 2026-09-02, after three
+attempts that all died the same way and reported it two different ways. Both causes are
+worth writing down because neither is in this repository.
+
+The visible error was `unknown sprint root file` naming NAH's own
+`events.jsonl.<pid>.<uuid>.tmp`. That was a decoy. Every real failure was
+`EPERM: operation not permitted, rename ...tmp -> events.jsonl`, which stranded the temp;
+the *next* attempt then failed earlier, on the validator, and reported the stranded temp
+instead of the rename. The holder was an orphaned `tail -f` on the ledger left behind by a
+killed background job - Git's `tail.exe` opens without `FILE_SHARE_DELETE`, so Windows
+refuses any rename over the file, and the lock outlived the job that took it. A `nah dev`
+watcher was suspected first and ruled out by test: the EPERM was unchanged with it stopped.
+`read-sprint.ts` in the `nah` repo now exempts the write temp by exact name, so an
+overlapping read no longer aborts on NAH's own bookkeeping.
+
+Then the refreshed `magic-link-gate` ran the gate for real, at 05:58, and **it failed** -
+exit 1, 354 seconds, `892 passed | 5 skipped`, no test failures at all. The gate failed on
+coverage alone:
+
+```
+Statements   : 84.75% ( 2252/2657 )   Branches : 81.70% ( 1349/1651 )
+Functions    : 87.76% (  545/ 621 )   Lines    : 86.52% ( 2062/2383 )
+```
+
+Where that shortfall lives, per package, off the same lcov:
+
+| package | lines | branches |
+|---|---|---|
+| `playbooks` | 0.47% | **0.00%** (0/165) |
+| `watch` | 63.03% | 77.01% |
+| `solari` | 89.26% | 80.92% |
+| `web` | 98.51% | 96.24% |
+| `api` | 98.82% | 95.24% |
+| `core` | 100% | 100% |
+
+**None of it is this sprint's.** `packages/web` and `packages/api` - everything
+`dashboard-read` wrote - are 96-100% against a 90% threshold. The gate is red because
+`packages/playbooks` and `packages/watch`, the in-flight code of the `action-playbooks`
+and `watch-engine` sprints, share this checkout and are barely tested yet.
+
+That is worth naming as a structural fact rather than an accident: **a repository-wide gate
+proof in a shared checkout couples every sprint's closure to every sibling's coverage.**
+Four of the five gate proofs here (`web-shell-gate`, `observation-reads-gate`,
+`magic-link-gate`, `watches-page-gate`) cannot go green while a sibling sprint is mid-flight,
+no matter what this sprint does. `calendar-tasks-gate` passed at 22:59 on 2026-09-01 only
+because it ran before those packages grew. Nothing this sprint can do repairs that, and
+writing tests for another sprint's package from here would collide with the session that
+owns it.
+
+Also carried, and benign: `watches-page-green` is stale because
+`packages/web/src/watches/view-model.ts` changed in `c8f9607` after that proof was verified.
+The diff is a pure extraction - the local `describeRefusal` moved to `../api-refusal`, body
+byte-identical. Behaviour is unchanged; the digest is not, and re-verifying is the honest way
+to close it rather than asserting it.
+
+## Two real defects the audit found, one of them mine
+
+**The one write in the sprint has no failure path.** `app/watches/pause/route.ts` awaits
+`client.setWatchStatus(id, status)` with nothing around it, and there is no `error.tsx` or
+`global-error.tsx` anywhere under `packages/web/src/app` - I checked, the files do not exist.
+So an `ApiError` or `ApiUnreachableError` from that call leaves the route handler and the
+reader gets Next's default 500. That is precisely the blank page
+`specs/read-dashboard-pages.md` forbids under Failure behavior, and the three *read* pages all
+honour it through `describeRefusal`. The middleware change made this reachable rather than
+theoretical: an unverifiable session is now waved through, so a reader is sitting on a rendered
+`/watches` page during an outage, and the one button on it takes them to a 500. A second, milder
+edge: when the `isWatchStatus` guard rejects the form the route still returns 303, so a refused
+pause is indistinguishable from a successful one. `watches/pause-route.test.ts` covers the happy
+path, an unknown status, missing fields, unauthenticated forwarding and the relative redirect -
+and never the API throwing.
+
+**The dev-server teardown races Turbopack's persist thread.** This one is mine, from the
+per-instance `distDir` isolation. `testing/dev-server.ts` `stop()` awaits `app.close()` and then
+removes `.next/instance-<uuid>`, but Turbopack's background persisting process is a Rust thread
+that `app.close()` does not join. It keeps writing into the directory that has just been deleted,
+and the gate run shows exactly that:
+
+```
+Persisting failed: Unable to write SST file 00000025.sst
+  failed to create file `...\.next\instance-<uuid>\dev\cache\turbopack\...`:
+  The system cannot find the path specified. (os error 3)
+Persisting is disabled for this session due to an unrecoverable error.
+thread '<unnamed>' (51808) panicked at turbopack\crates\turbo-tasks-backend\...:
+  Failed to restore data for task TaskId 135
+```
+
+Three things follow, in rising order of seriousness. The stderr is noise. "Persisting is
+disabled for this session" is process-wide, so every later dev server in that worker loses
+Turbopack caching - the suite gets slower the more servers it boots. And a panicking Rust
+thread is a process that can abort out from under a passing test run. It did not fail this
+run, which is exactly why it is worth fixing before it fails one nobody is watching.
+
+Two repair tasks carry these, both tagged `origin: hardening`, both inside the accepted
+outcome - neither changes the specification, the architecture, or the task graph, so planning
+stays where it is.
+
+Not raised as blocking, but recorded so the next reader does not have to re-derive them:
+`vitest.config.ts` sets `coverage.include: ['packages/*/src/**/*.ts']`, so every `.tsx` in the
+dashboard - all five pages, the layout, the sparkline - sits outside the numeric threshold. The
+pages are genuinely proven, by the Playwright e2e, so this is an instrument gap rather than
+unproven behaviour: a `.tsx` regression would not move the coverage number. And
+`readSessionReading` turns only `ApiUnreachableError` into `unverifiable`, so an API that is up
+but answering 5xx on `GET /auth/session` - the more common partial outage - throws out of the
+middleware and takes every route to a 500, including the pages whose job is to say the API is
+unwell. The code documents that choice deliberately; the audit question is whether the outcome
+it produces is the right one for the failure mode most likely in production. The e2e proves the
+unreachable branch only, by pointing the dashboard at a dead port.
+
+<!-- nah-checkpoint:dd340a3e3ec7db47 -->
+## 2026-09-02T06:14:31.575Z · claude-code · 5d95e0f7-c219-4b9b-a8fe-1cc34fda587b
+
+- Stage: hardening
+- Ready: dev-server-teardown-race
+- In progress: pause-failure-path
+- Root blockers: none
+- Done: 5/7
+- Receipts: verification-completed-event8e7c513a275d4bb2ab2299ac1498c201, verification-completed-eventf42df3f48c344d3bb98ac3efda4c8cad, verification-completed-event36cb9748df6c4bb582a7c2a1d6477049, verification-completed-event9be7a2a0427d4aa0a77d21288583d7ad, verification-completed-event093d858c0fa64d39b4266d6be234b569, verification-completed-eventbdb48f3d1bbc4e378a8f93f705f75c54, verification-completed-eventdd1d0472018a4db88e5f22d09d3f14ed, verification-completed-evented1c2b4bdbb942e3b33acc73d281bd34, verification-completed-event12bc62fd1aa647f29d0e3d8633747ff2, verification-completed-eventb802dd7c5d6f4599b3a855c1667f6da7, verification-completed-event0b568305e2ea4701bbce0b60c6de085d, verification-completed-eventace4511ea0f64574919047cc81d794b5, verification-completed-event0b9bdd8bb47e4f21a181cc1395070485, verification-completed-event6cb9676fdc71487fa8b27ae46ca3fa23, verification-completed-event47a1fa6a932d422d9f1352fa3de8a960, verification-completed-eventf19ff2229d444a5a9e69ef8bfb97930b, verification-completed-event7394f7819de44f1a8bb1b8b9f33607ef, verification-completed-event476e828b09f5488384852bb487ca62ff, verification-completed-event2b9df0fc13234c3dabaa3acd5c6c4717, verification-completed-event236e60fa1e6343d6ae69cb45db809d2d, verification-completed-eventc84de2ed59bf40769d6f03b74e4bea6b, verification-completed-eventfd57b628716c41f2bd2cbb2c81514e09, verification-completed-event09714b3882644e5d976f80b19d9d7607, verification-completed-eventc38fa644df9c47b8bae757e9ebc36eaa, verification-completed-event97a209391f2e4f7e9116aea1f652a241, verification-completed-eventc4ebb50f59bb4533aff595d4580090fb, verification-completed-event7f3d5cc7bc084b748f8a5ff40202b124, verification-completed-eventc671e33dc89a4302a96c10e2eeee2026, verification-completed-eventd4a9c01145d34195bf6ead972dcdfc00, verification-completed-event03277ebac5cd4beca34acd3c1aba039d, verification-completed-evented3d6624c8c142c391c9c7c56c03187b, verification-completed-event40f4909283b948bba4edfea32962dda1, verification-completed-eventbe9d35e700c645948f1e9d387700fb02, verification-completed-event77b613e3457d4f21869eb05448195cd5, verification-completed-event5075d5815a6a4d8aadeb1b574dafd5bc, verification-completed-event216a570aae424ff19d6d75c16ed0c7d2, verification-completed-event4b88ebf788fe488e979fa4ba81194e35, verification-completed-evente3799a03e97746ee89a8004396f773c0, verification-completed-event7d52cf176eae4dbaa051e613bbcb5b2a, verification-completed-event4e9cee0481144e06a3b777ea92fcfa84, verification-completed-evente52dcfd6c6624f25a53947e4370b2485
+- Findings: none
+- Assurance request: hardening:hardening-he1350689e8780557
+- Knowledge revisions: none
+- Resume: `nah harden s4`
+
+
+## Both hardening repairs are closed, and what they cost to decide
+
+**The one write now fails the way every read already did.** `POST /watches/pause`
+catches, classifies through `describeRefusal`, and returns the reader to the list either
+way - `?pause=failed` when the API refused or did not answer, `?pause=rejected` when the
+form named a status `isWatchStatus` does not have. `/watches` renders either as a
+`role="alert"` sentence. A defect in this process still throws, because `describeRefusal`
+is used for its judgement and not for its sentence: it is the one place that decides
+whether the API said this or this code is broken.
+
+Two decisions inside that are worth more than the diff.
+
+*The wire carries a token, not prose.* The obvious design puts the API's own message in
+the query string, and the read pages do print the API's words, so it looks consistent.
+It is not: those words came back from the API inside the request that was drawing the
+page, and a query parameter is whatever the link said. `/watches?pause=Your+card+was+declined,+call+555-0100`
+would have rendered in this dashboard's voice, under its heading, styled as its alert.
+`pause-outcome.ts` holds the closed set instead, and the tests assert that an unrecognised
+token says nothing at all - `toString` and `__proto__` included. This is the same choice
+`/login?sent=1` already makes here. It costs something real and the code says so: a refusal
+the API explained arrives as the general sentence. The reader's next move is the same
+either way, and the list they land on has been re-read from the API.
+
+*Proving it in a browser needed the refusal, not the outage.* With the API stopped there
+is no rendered page to press a button on - the read fails too, so there is no row and no
+form. The e2e edits the rendered form's hidden id to a watch the account does not own and
+presses Pause: the API answers 404 (and, because the update is scoped by owner as well as
+id, never writes the row), which is a real refusal through the real route. The dev server's
+own log across that run reads `POST /watches/pause 303` then `GET /watches?pause=failed 200` -
+which is precisely the 500 that used to be there.
+
+One process note, because it nearly went the other way: the green proof's claim, as first
+written, promised a real-browser assertion while its `argv` ran only the unit file. That is
+a receipt that would have been true about the command and false about the claim. It was
+reconciled before anything was verified - the argv now runs both files, and the claim says
+what they prove.
+
+**The teardown race is gone by deleting the writer, not by ordering the teardown.**
+`experimental.turbopackFileSystemCacheForDev` is off whenever `NEXT_DIST_DIR` names a
+per-instance build directory. The argument is that there is no correct ordering worth
+building here: the directory is named with a fresh uuid and deleted at teardown, so the
+cache it persists is never read even when it is written perfectly. Turbopack was doing that
+work on a native thread `app.close()` does not join, into a directory `stop()` was about to
+remove, and the failure was not local - `Persisting is disabled for this session` is
+process-wide, so every later dev server in that worker lost its caching, and the
+turbo-tasks thread that followed could panic long after the test that caused it had passed.
+A real `next dev` sets no such variable and keeps its cache.
+
+It is proven by the absence of `<distDir>/dev/cache/turbopack` while the server is still up,
+rather than by the absence of that stderr. A message printed by a native thread some time
+after teardown is exactly the kind of evidence that is not there yet when you look for it;
+the cache directory is there or it is not. `WebDevServer` now exposes `buildDirectory` so
+the property is assertable rather than trusted by inspection.
+
+That test also turned up a constraint nothing else here had hit: `next()` registers a
+Turbopack worker creator per process, so a second in-process dashboard in the same worker
+rejects with `Worker creator already registered` before it binds. Every integration file
+boots exactly one, which is why it had never surfaced - but a future file that wants two
+cannot have them, and will get an `unhandledRejection` rather than a clear failure.
+
+## What is left, and it is not implementation work
+
+Both hardening findings that named a defect are closed with green receipts. What remains is
+the structural one, and it is a decision rather than a task: **four of the five gate proofs
+in this sprint run `node scripts/check.mjs`, which is repository-wide, in a checkout shared
+with two sprints that are mid-flight.** The last full gate run passed 892 tests with zero
+failures and exited 1 on coverage alone, entirely from `packages/playbooks` (0.47% lines,
+0/165 branches) and `packages/watch` (63.03%). Everything this sprint wrote is 96-100%
+against a 90% threshold. Writing tests for another sprint's package from here would collide
+with the session that owns it, so this sprint cannot turn those proofs green by any means
+available to it. The three ways out - wait for the siblings, scope the gate per package, or
+close carrying the finding - are not equivalent, and none of them is an implementation
+decision.
+
+
+## Hardening round two: what a second look was pointed at, and what it found
+
+Fresh dimensions, not a re-reading of the implementation narrative. Round one went
+consumer-backward through acceptance behavior, failure paths, composition, testing posture,
+specification adherence and repository patterns. This round asked four different questions,
+three of them provoked by the repairs themselves.
+
+**Is the write the only place that was unguarded?** Swept every call site of the API client
+in the dashboard rather than the one the finding named - eight of them, across both writes
+and all four reads. All eight now sit inside a `try`, and both write routes rethrow anything
+that is not an `ApiError`: `login/request` swallows a refusal on purpose, because the API
+answers a known and an unknown address identically and a page that reported the difference
+would hand back the answer the API withheld. The pause route was the only unguarded one, and
+it is the one that was repaired. No second instance of the defect class.
+
+**How far does the repair's configuration branch reach?** `next.config.mjs` now behaves
+differently when `NEXT_DIST_DIR` is set, which is a production config file taking a
+test-shaped instruction. `NEXT_DIST_DIR` is written in exactly one place in this repository -
+`testing/dev-server.ts` - and nothing in `scripts/`, `.github/`, or any package sets it. A
+real `next dev` and a real build cannot reach the branch that turns the cache off.
+
+**Where does a failed pause go on the way to an operator?** Nowhere, and that is worth
+writing down rather than repairing here. `packages/web` has no logging of any kind in
+non-test source - no `console`, no logger, not on one path. So when the route catches an
+`ApiError` it discards a `code`, a `message` and a `details` array that nothing else in this
+process will ever record. The repair made that slightly worse on one path: before it, the
+throw at least reached Next's error output.
+
+It is not raised as a gap against this sprint, for two reasons that should be checked rather
+than assumed if that ever changes. The refusal case is not actually lost - the API recorded
+the 404 or 500 it sent, on the other side of the same call - and the unreachable case is
+self-evident from the API's own silence. And adding a logger to one path in a package that
+deliberately has none anywhere would be a new seam introduced at hardening, on the narrowest
+possible evidence. The honest description is that this dashboard has no server-side
+observability at all, by construction and consistently, and that is a posture question for
+whoever owns the next sprint, not a defect in this one.
+
+**Did the repairs invalidate anything already proven?** Yes, three proofs, and this is the
+part worth reading. `testing/dev-server.ts` is covered by proofs on three different tasks, so
+changing it made `web-shell-renders`, `dashboard-guard-green` and `watches-page-green` stale
+by digest. NAH will not re-bind them: `nah verify --retry` on each answers *"has stale
+evidence but no active implementation session can refresh it"*, which is the designed
+behaviour - a hardening stage does not get to refresh a closed task's receipts, and stale
+evidence is carried as a non-blocking finding instead.
+
+What a hardening stage can do is find out whether the staleness means anything, so it was
+run out of band and the answer is recorded here rather than asserted: `smoke-page` and
+`auth-guard` together, against the repaired harness, `2 passed (2) | 9 passed (9)`, exit 0;
+`watches-page.integration.test.ts` passed in full inside the `pause-failure-green` receipt,
+which is what re-ran it after the change; and `calendar-tasks-pages`, the last consumer of
+that harness, `8 passed (8)`, exit 0. That file is also the check on the one-instance-per-worker
+constraint above - it reaches its API-outage case by swapping `API_BASE_URL` on the single
+server it already has, rather than by booting a second one. The bindings are stale. The behaviour behind them is
+current, and that distinction is the whole finding.
+
+**The gate, deliberately not re-run.** A repository-wide `--coverage` run needs the checkout
+to itself - two of them in one tree destroy each other through `coverage/.tmp` - and a sibling
+session was mid-run on `packages/api/src/watch-config.integration.test.ts` while this audit
+was being written. So the gate evidence on record is still round one's, from 05:58, and it
+predates these repairs. That is not a shrug: it is the structural finding happening again, in
+the smallest possible way. The gate this sprint is judged by is a resource the whole
+repository shares, and it was in use by somebody else.
+
+<!-- nah-checkpoint:6ae6745c7f677cd0 -->
+## 2026-09-02T06:53:30.619Z · claude-code · 5d95e0f7-c219-4b9b-a8fe-1cc34fda587b
+
+- Stage: hardening
+- Ready: none
+- In progress: none
+- Root blockers: none
+- Done: 7/7
+- Receipts: verification-completed-event8e7c513a275d4bb2ab2299ac1498c201, verification-completed-eventf42df3f48c344d3bb98ac3efda4c8cad, verification-completed-event36cb9748df6c4bb582a7c2a1d6477049, verification-completed-event9be7a2a0427d4aa0a77d21288583d7ad, verification-completed-event093d858c0fa64d39b4266d6be234b569, verification-completed-eventbdb48f3d1bbc4e378a8f93f705f75c54, verification-completed-eventdd1d0472018a4db88e5f22d09d3f14ed, verification-completed-evented1c2b4bdbb942e3b33acc73d281bd34, verification-completed-event12bc62fd1aa647f29d0e3d8633747ff2, verification-completed-eventb802dd7c5d6f4599b3a855c1667f6da7, verification-completed-event0b568305e2ea4701bbce0b60c6de085d, verification-completed-eventace4511ea0f64574919047cc81d794b5, verification-completed-event0b9bdd8bb47e4f21a181cc1395070485, verification-completed-event6cb9676fdc71487fa8b27ae46ca3fa23, verification-completed-event47a1fa6a932d422d9f1352fa3de8a960, verification-completed-eventf19ff2229d444a5a9e69ef8bfb97930b, verification-completed-event7394f7819de44f1a8bb1b8b9f33607ef, verification-completed-event476e828b09f5488384852bb487ca62ff, verification-completed-event2b9df0fc13234c3dabaa3acd5c6c4717, verification-completed-event236e60fa1e6343d6ae69cb45db809d2d, verification-completed-eventc84de2ed59bf40769d6f03b74e4bea6b, verification-completed-eventfd57b628716c41f2bd2cbb2c81514e09, verification-completed-event09714b3882644e5d976f80b19d9d7607, verification-completed-eventc38fa644df9c47b8bae757e9ebc36eaa, verification-completed-event97a209391f2e4f7e9116aea1f652a241, verification-completed-eventc4ebb50f59bb4533aff595d4580090fb, verification-completed-event7f3d5cc7bc084b748f8a5ff40202b124, verification-completed-eventc671e33dc89a4302a96c10e2eeee2026, verification-completed-eventd4a9c01145d34195bf6ead972dcdfc00, verification-completed-event03277ebac5cd4beca34acd3c1aba039d, verification-completed-evented3d6624c8c142c391c9c7c56c03187b, verification-completed-event40f4909283b948bba4edfea32962dda1, verification-completed-eventbe9d35e700c645948f1e9d387700fb02, verification-completed-event77b613e3457d4f21869eb05448195cd5, verification-completed-event5075d5815a6a4d8aadeb1b574dafd5bc, verification-completed-event216a570aae424ff19d6d75c16ed0c7d2, verification-completed-event4b88ebf788fe488e979fa4ba81194e35, verification-completed-evente3799a03e97746ee89a8004396f773c0, verification-completed-event7d52cf176eae4dbaa051e613bbcb5b2a, verification-completed-event4e9cee0481144e06a3b777ea92fcfa84, verification-completed-evente52dcfd6c6624f25a53947e4370b2485, verification-completed-event3169a3883882406d8806ecd935721fa3, verification-completed-event77504c4e48964be7bef5ed87cd6d22f9, verification-completed-eventcf722ebcc5524371ba2980e8c3911ea0, verification-completed-event98bb931c6b404149beb02907572b3830, verification-completed-event9bd122436c0e4a06ae50a689c4fd23e4, verification-completed-eventf6cc5537f56c451c9c67bae3bb3e77df
+- Findings: none
+- Assurance request: hardening:hardening-he1350689e8780557
+- Knowledge revisions: none
+- Resume: `nah harden s4`
