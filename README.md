@@ -54,7 +54,7 @@ passes here it passes there.
 | `pnpm migrate` | Applies the migration set to `DATABASE_URL`. |
 | `pnpm browsers` | Downloads the pinned Chromium the browser provider drives. |
 | `pnpm start` | Runs the API server on `HOST` and `PORT`. |
-| `pnpm worker` | Runs the job worker: checks watches on their schedules and reconciles the schedule set once a minute. |
+| `pnpm worker` | Runs the job worker: checks watches on their schedules, reconciles the schedule set once a minute, and runs queued tasks through their playbooks in a guarded browser. |
 | `pnpm clean` | Removes build output. |
 
 `pnpm start` and `pnpm worker` are the two long-running processes: one

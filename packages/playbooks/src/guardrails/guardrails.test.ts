@@ -7,6 +7,7 @@ import {
   paymentFingerprint,
   paymentQuestion,
   stopOutcome,
+  type AllowlistViolation,
   type GuardrailPolicy,
   type PaymentGate,
   type RequestFacts,
@@ -217,6 +218,23 @@ describe('stopOutcome', () => {
       cause: 'violation',
       reason: "navigation to https://evil.test/x is outside the task's allowlist",
       detail: judgement.stop,
+    });
+  });
+
+  it('fails the mission by violation on a request-context stop, and says the request would have bypassed the guard', () => {
+    const stop: AllowlistViolation = {
+      kind: 'allowlist',
+      attemptedUrl: 'https://evil.test/x',
+      via: 'request-context',
+      redirectedFrom: undefined,
+      from: 'https://fakegym.test/member',
+      reason: 'unguarded',
+    };
+    expect(stopOutcome(stop)).toEqual({
+      kind: 'failed',
+      cause: 'violation',
+      reason: "request to https://evil.test/x through the browser's request context would bypass the guard",
+      detail: stop,
     });
   });
 

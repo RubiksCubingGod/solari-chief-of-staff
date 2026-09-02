@@ -37,6 +37,13 @@ import { SNAPSHOT_SCRIPT, isPageSnapshot, snapshotPage } from './snapshot.js';
  * by fingerprint, on the next run; a decline cancels the task; anything else
  * asks again. There is no field that turns either rule off.
  *
+ * One door shut. `page.request` and `context.request` are Playwright's
+ * request context: a request sent from Node with the context's cookies that
+ * no route handler ever sees, so neither rule above could judge it. Its
+ * request methods are refused outright, as an allowlist violation naming the
+ * URL, so a step or a tool that reaches for them ends the task the same way a
+ * blocked navigation does.
+ *
  * A stop is terminal for the session: nothing else leaves the context after
  * it, and the session is released under whatever was still driving the page.
  */
@@ -55,12 +62,14 @@ export interface GuardrailPolicy {
 export interface AllowlistViolation {
   readonly kind: 'allowlist';
   readonly attemptedUrl: string;
-  readonly via: 'navigation' | 'redirect' | 'popup';
+  /** `request-context` for a request made from Node through `page.request` or `context.request`. */
+  readonly via: 'navigation' | 'redirect' | 'popup' | 'request-context';
   /** The URL that answered with the redirect, for `via: 'redirect'`. */
   readonly redirectedFrom: string | undefined;
   /** Where the page was when it tried. */
   readonly from: string;
-  readonly reason: 'host' | 'scheme' | 'unparseable';
+  /** `unguarded`: the request would not have passed through the guard at all. */
+  readonly reason: 'host' | 'scheme' | 'unparseable' | 'unguarded';
 }
 
 export interface PaymentGate {
@@ -377,6 +386,51 @@ async function serveNavigation(
   });
 }
 
+/** The request methods of Playwright's `APIRequestContext`. `dispose` and `storageState` send nothing. */
+const REQUEST_METHODS = ['delete', 'fetch', 'get', 'head', 'patch', 'post', 'put'] as const;
+
+function isRequestLike(value: unknown): value is { url(): string } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { url?: unknown }).url === 'function'
+  );
+}
+
+/** The URL a request-context call was for: a string, or a `Request` to replay. */
+function requestedUrl(urlOrRequest: unknown): string {
+  if (typeof urlOrRequest === 'string') return urlOrRequest;
+  if (isRequestLike(urlOrRequest)) return urlOrRequest.url();
+  return String(urlOrRequest);
+}
+
+/**
+ * Shuts the context's other door. `page.request` and `context.request` are one
+ * `APIRequestContext` that sends from the driver, never through a route, so
+ * its request methods are replaced on the instance with ones that raise a
+ * stop and refuse. The private path navigation serving takes (`route.fetch`)
+ * does not go through these and is untouched.
+ */
+function denyRequestContext(context: BrowserContext, raise: (attemptedUrl: string) => void): void {
+  const door: object = context.request;
+  for (const method of REQUEST_METHODS) {
+    Object.defineProperty(door, method, {
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: (urlOrRequest: unknown): Promise<never> => {
+        const attemptedUrl = requestedUrl(urlOrRequest);
+        raise(attemptedUrl);
+        return Promise.reject(
+          new Error(
+            `request to ${attemptedUrl} through the browser's request context was refused: it would bypass the guard`,
+          ),
+        );
+      },
+    });
+  }
+}
+
 export interface Guardrails {
   /** The first stop, once there is one. Nothing leaves the context after it. */
   readonly stop: GuardStop | undefined;
@@ -410,6 +464,20 @@ export async function installGuardrails(
     return true;
   };
   await watchSubmissions(context);
+  denyRequestContext(context, (attemptedUrl) => {
+    if (stop === undefined) {
+      const pages = context.pages();
+      stop = {
+        kind: 'allowlist',
+        attemptedUrl,
+        via: 'request-context',
+        redirectedFrom: undefined,
+        from: pages[pages.length - 1]?.url() ?? 'about:blank',
+        reason: 'unguarded',
+      };
+      announce(stop);
+    }
+  });
   context.on('request', (request) => {
     const hop = hopFacts(request);
     if (hop !== undefined) admit(hop);
@@ -560,7 +628,10 @@ export function stopOutcome(stop: GuardStop): MissionOutcome {
     return {
       kind: 'failed',
       cause: 'violation',
-      reason: `navigation to ${stop.attemptedUrl} is outside the task's allowlist`,
+      reason:
+        stop.via === 'request-context'
+          ? `request to ${stop.attemptedUrl} through the browser's request context would bypass the guard`
+          : `navigation to ${stop.attemptedUrl} is outside the task's allowlist`,
       detail: stop,
     };
   }
