@@ -315,17 +315,24 @@ describe('choosePlaybook', () => {
   const registry = createPlaybookRegistry([playbook([done('login')])]);
 
   const refused: [string, Partial<Task>, string][] = [
-    ['agentic mode', { mode: 'agentic' }, 'agentic mode has no runner yet'],
     ['an input that is a list', { input: ['fakegym'] }, 'the task input is not an object'],
     ['an input that is null', { input: null }, 'the task input is not an object'],
+  ];
+
+  it.each(refused)('refuses %s in a sentence', (_named, overrides, reason) => {
+    expect(choosePlaybook(registry, task(overrides))).toEqual({ kind: 'refused', reason });
+  });
+
+  const unmatched: [string, Partial<Task>, string][] = [
+    ['agentic mode', { mode: 'agentic' }, 'the task asks for agentic mode'],
     ['an input that names no site', { input: { plan: 'gold' } }, 'the task input names no site'],
     ['an input whose site is blank', { input: { site: '  ' } }, 'the task input names no site'],
     ['a site no playbook knows', { input: { site: 'nowhere' } }, 'no playbook for cancel on nowhere'],
     ['an action the site has no playbook for', { kind: 'book_slot' }, 'no playbook for book_slot on fakegym'],
   ];
 
-  it.each(refused)('refuses %s in a sentence', (_named, overrides, reason) => {
-    expect(choosePlaybook(registry, task(overrides))).toEqual({ kind: 'refused', reason });
+  it.each(unmatched)('leaves %s unmatched, in a sentence, for a fallback to take', (_named, overrides, reason) => {
+    expect(choosePlaybook(registry, task(overrides))).toEqual({ kind: 'unmatched', reason });
   });
 
   it('chooses the playbook for the site the input names and the kind of task, with the input as a record', () => {

@@ -144,6 +144,9 @@ importers:
 
   packages/playbooks:
     dependencies:
+      '@anthropic-ai/sdk':
+        specifier: 0.122.0
+        version: 0.122.0(zod@4.5.4)
       '@chief-of-staff/core':
         specifier: workspace:*
         version: link:../core
@@ -153,6 +156,9 @@ importers:
       '@chief-of-staff/solari':
         specifier: workspace:*
         version: link:../solari
+      drizzle-orm:
+        specifier: 0.45.2
+        version: 0.45.2(@types/pg@8.23.1)(pg@8.23.0)
       playwright:
         specifier: 1.62.1
         version: 1.62.1

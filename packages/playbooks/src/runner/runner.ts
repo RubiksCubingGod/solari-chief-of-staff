@@ -55,6 +55,12 @@ export interface PlaybookRunnerOptions {
   readonly credentials?: CredentialSource;
   /** Asked of every session, under the runner's own asks: the recording, and the profile. */
   readonly request?: BrowserRequest;
+  /**
+   * The mission for a task no playbook matches: agentic mode, or a
+   * kind-and-site the registry has no entry for. Without one, such a task
+   * fails in a sentence that says so.
+   */
+  readonly fallback?: Mission;
 }
 
 export type PlaybookChoice =
@@ -63,28 +69,33 @@ export type PlaybookChoice =
       readonly playbook: Playbook;
       readonly input: Readonly<Record<string, unknown>>;
     }
-  | { readonly kind: 'refused'; readonly reason: string };
+  | { readonly kind: 'refused'; readonly reason: string }
+  /** Nothing is wrong with the task; the registry just has nothing for it. A fallback may. */
+  | { readonly kind: 'unmatched'; readonly reason: string };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**
- * Which playbook a task gets, or why none. Every refusal is a sentence a
+ * Which playbook a task gets, or why none. A refusal is an input nothing
+ * could run; unmatched means no playbook claims the task - it asks for
+ * agentic mode, names no site, or names a site and kind the registry has no
+ * entry for - and a fallback still might. Every reason is a sentence a
  * person can act on, and none of them has opened a browser.
  */
 export function choosePlaybook(registry: PlaybookRegistry, task: Task): PlaybookChoice {
   if (task.mode !== 'playbook') {
-    return { kind: 'refused', reason: `${task.mode} mode has no runner yet` };
+    return { kind: 'unmatched', reason: 'the task asks for agentic mode' };
   }
   if (!isRecord(task.input)) return { kind: 'refused', reason: 'the task input is not an object' };
   const site = task.input['site'];
   if (typeof site !== 'string' || site.trim() === '') {
-    return { kind: 'refused', reason: 'the task input names no site' };
+    return { kind: 'unmatched', reason: 'the task input names no site' };
   }
   const playbook = registry.lookup(site, task.kind);
   if (playbook === undefined) {
-    return { kind: 'refused', reason: `no playbook for ${task.kind} on ${site}` };
+    return { kind: 'unmatched', reason: `no playbook for ${task.kind} on ${site}` };
   }
   return { kind: 'chosen', playbook, input: task.input };
 }
@@ -187,7 +198,9 @@ function refusal(reason: string): MissionOutcome {
 type Access =
   | { readonly kind: 'signed-in'; readonly connection: SiteConnection; readonly credential: SiteCredential }
   | { readonly kind: 'open' }
-  | { readonly kind: 'refused'; readonly reason: string };
+  | { readonly kind: 'refused'; readonly reason: string }
+  /** Nothing is wrong with the task; the registry just has nothing for it. A fallback may. */
+  | { readonly kind: 'unmatched'; readonly reason: string };
 
 /** The connection and credential a `connection` playbook signs in with, or why it cannot. */
 async function signIn(
@@ -206,12 +219,27 @@ async function signIn(
   return { kind: 'signed-in', connection, credential };
 }
 
-/** The mission a worker registers the task engine with. */
+/** What an unmatched task fails with when nothing else will run it. */
+function runnerless(task: Task, reason: string): string {
+  return task.mode === 'agentic' ? 'agentic mode has no runner yet' : reason;
+}
+
+/**
+ * The mission a worker registers the task engine with. A task no playbook
+ * matches goes to the fallback, with the trail saying why the playbooks
+ * passed on it; without a fallback it fails there.
+ */
 export function createPlaybookMission(options: PlaybookRunnerOptions): Mission {
   const credentials = options.credentials ?? profileCredentials;
-  return async ({ task, answers, step }) => {
+  return async (mission) => {
+    const { task, answers, step } = mission;
     const choice = choosePlaybook(options.registry, task);
     if (choice.kind === 'refused') return refusal(choice.reason);
+    if (choice.kind === 'unmatched') {
+      if (options.fallback === undefined) return refusal(runnerless(task, choice.reason));
+      await step({ name: 'playbook', outcome: 'unmatched', detail: { reason: choice.reason } });
+      return options.fallback(mission);
+    }
     const { playbook } = choice;
     await recordPlaybook(options.db, task.id, playbook.id);
     const access: Access =
