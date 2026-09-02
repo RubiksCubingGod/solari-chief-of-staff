@@ -16,10 +16,20 @@ interface Step {
   readonly with?: Record<string, unknown>;
 }
 
+interface Job {
+  readonly 'runs-on'?: string;
+  readonly needs?: string | readonly string[];
+  readonly if?: string;
+  readonly env?: Record<string, string>;
+  readonly outputs?: Record<string, string>;
+  readonly steps?: Step[];
+}
+
 interface Workflow {
   readonly name?: string;
   readonly on?: Record<string, unknown>;
-  readonly jobs?: Record<string, { 'runs-on'?: string; steps?: Step[] }>;
+  readonly concurrency?: { group?: string; 'cancel-in-progress'?: boolean };
+  readonly jobs?: Record<string, Job>;
 }
 
 function read(path: string): string {
@@ -51,6 +61,15 @@ describe('.github/workflows/check.yml', () => {
   it('runs the same gate a developer runs, and nothing narrower', () => {
     expect(runs).toContain('pnpm check');
     expect(manifest.scripts['check']).toBe('node scripts/check.mjs');
+  });
+
+  it('installs the browser the provider contract suite drives, before the gate', () => {
+    // `pnpm install` does not fetch it, so without this step the contract suite
+    // fails on every push with a missing executable rather than a real defect.
+    const browsers = runs.findIndex((run) => run.startsWith('pnpm browsers'));
+    expect(browsers).toBeGreaterThanOrEqual(0);
+    expect(runs.indexOf('pnpm check')).toBeGreaterThan(browsers);
+    expect(manifest.scripts['browsers']).toBe('node scripts/browsers.mjs');
   });
 
   it('installs from the lockfile so CI cannot silently resolve newer versions', () => {
@@ -86,5 +105,65 @@ describe('.github/pull_request_template.md', () => {
     // reads.
     expect(template).toMatch(/- \[ \] /u);
     expect(template).not.toMatch(/- \[x\] /iu);
+  });
+});
+
+const liveSmoke = parse(read('../.github/workflows/live-smoke.yml')) as Workflow;
+const liveSmokeJob = liveSmoke.jobs?.['live-smoke'];
+const liveSmokeRuns = (liveSmokeJob?.steps ?? []).flatMap((step) =>
+  step.run === undefined ? [] : [step.run],
+);
+
+describe('.github/workflows/live-smoke.yml', () => {
+  it('fires only on a schedule or a manual dispatch, never on push or pull request', () => {
+    // The whole cost story rests on this. On `push` it would spend vendor
+    // credit per commit; on `pull_request` a fork could not read the secret and
+    // would report a green run that called nothing at all.
+    const triggers = Object.keys(liveSmoke.on ?? {}).sort();
+    expect(triggers).toEqual(['schedule', 'workflow_dispatch']);
+  });
+
+  it('carries an actual cron entry rather than an empty schedule', () => {
+    const schedule = (liveSmoke.on ?? {})['schedule'];
+    expect(Array.isArray(schedule)).toBe(true);
+    expect((schedule as { cron?: string }[])[0]?.cron).toMatch(/^\S+ \S+ \S+ \S+ \S+$/u);
+  });
+
+  it('reports a missing secret as a skipped job instead of a green one', () => {
+    // A job-level `if` cannot read `secrets`, so the presence check is a job of
+    // its own and the smoke depends on its output. When the key is absent the
+    // smoke job is *skipped* in the run summary - which is the point: the one
+    // outcome that must never happen is a green run that called nothing.
+    expect(liveSmokeJob?.needs).toBe('guard');
+    expect(liveSmokeJob?.if).toContain("needs.guard.outputs.configured == 'true'");
+    expect(liveSmoke.jobs?.['guard']?.outputs?.['configured']).toContain('steps.key.outputs');
+  });
+
+  it('queues an overlapping run rather than cancelling one mid-session', () => {
+    // A cancelled live run abandons a real browser session, and the slot stays
+    // held until the vendor's orphan reaper gets to it.
+    expect(liveSmoke.concurrency?.group).toBe('live-smoke');
+    expect(liveSmoke.concurrency?.['cancel-in-progress']).toBe(false);
+  });
+
+  it('runs the same entry point a developer runs, and hands it the secret', () => {
+    expect(liveSmokeRuns).toContain('node scripts/live-smoke.mjs');
+    expect(liveSmokeJob?.env?.['SOLARI_API_KEY']).toContain('secrets.SOLARI_API_KEY');
+    // The script has to exist under the name the workflow calls; `read` throws
+    // if a rename ever leaves the nightly pointing at nothing.
+    expect(read('../scripts/live-smoke.mjs')).toContain('SOLARI_LIVE_SMOKE');
+  });
+
+  it('installs from the lockfile, like every other job here', () => {
+    expect(liveSmokeRuns).toContain('pnpm install --frozen-lockfile');
+  });
+});
+
+describe('the ordinary gate stays offline', () => {
+  it('never puts the Solari key anywhere near the push-triggered check', () => {
+    // `check.yml` runs on every push. If the key ever reaches it, the live
+    // suite's opt-in guard becomes the only thing standing between a commit and
+    // a bill - and guards get edited.
+    expect(read('../.github/workflows/check.yml')).not.toContain('SOLARI_API_KEY');
   });
 });

@@ -15,5 +15,9 @@
   ],
   "scripts": {
     "build": "tsc --build"
+  },
+  "dependencies": {
+    "@solarisdk/browser": "0.1.2",
+    "playwright": "1.62.1"
   }
 }
