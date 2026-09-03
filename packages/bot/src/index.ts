@@ -77,3 +77,11 @@ export {
   type TranscriptEntry,
 } from './transcript.js';
 export { createTelegramUserIO } from './user-io.js';
+export {
+  notifyOpsOfNight,
+  renderOpsNotification,
+  type OpsNight,
+  type OpsNightColour,
+  type OpsNotice,
+  type OpsNotificationOptions,
+} from './ops-notification.js';

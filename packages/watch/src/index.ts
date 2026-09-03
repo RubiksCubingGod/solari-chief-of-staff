@@ -64,3 +64,27 @@ export {
   type SnipeSweepReport,
 } from './snipe.js';
 export { createDrizzleWatchStore } from './store.js';
+export {
+  CASE_CLASSES,
+  CASE_OUTCOMES,
+  RELEASE_GREEN_NIGHTS,
+  judgeRecord,
+  sumCaseCosts,
+  summarizeNight,
+  type CaseClass,
+  type CaseCost,
+  type CaseOutcome,
+  type CaseResult,
+  type NightColour,
+  type NightCost,
+  type NightInput,
+  type NightSummary,
+  type RecordVerdict,
+} from './live-ops/verdict.js';
+export {
+  appendNight,
+  parseNightsRecord,
+  renderNightReport,
+  renderNightsTable,
+  type NightsRecord,
+} from './live-ops/report.js';

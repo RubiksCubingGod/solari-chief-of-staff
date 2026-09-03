@@ -1,0 +1,118 @@
+# The nightly live-ops gate: every case class the release counts - a real
+# browser session's lifecycle, the real-site watch checks, one fixture-target
+# mission through the production engine, and the live eval suite - run in
+# one go by scripts/live-ops.mjs, which sums what they cost against the
+# target, judges the night green, failed or errored, writes the report this
+# job uploads, and sends a night that is not green to the person on call.
+#
+# Deliberately not on `push` or `pull_request`: every run spends vendor credit
+# on both keys, and a pull request from a fork cannot read either. The
+# scripted proofs of the same code paths are in `pnpm check`.
+#
+# Later than the other nightlies, and off their minutes, so it never shares
+# their runner's worst hour or their concurrency group: a night is a
+# measurement, and a measurement taken while the smoke holds a session
+# would count that session's cost twice.
+name: live-ops
+
+on:
+  schedule:
+    - cron: '23 8 * * *'
+  workflow_dispatch:
+    inputs:
+      cost_target_usd:
+        description: 'The most this night may spend across both vendors, in dollars'
+        required: false
+        default: '5'
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never two nights at once: two runs on one pair of keys would each sum
+  # the other's spend into its own. A queued run waits rather than being
+  # cancelled, so a manual dispatch cannot silently discard the nightly.
+  group: live-ops
+  cancel-in-progress: false
+
+jobs:
+  # The secrets cannot be read from a job-level `if`, so the check is a job
+  # of its own. Its output is what lets the night report *skipped* rather
+  # than green when a key is missing - a green night that ran nothing is the
+  # one outcome this workflow must never produce, and the script refuses to
+  # run without both keys for the same reason.
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      configured: ${{ steps.key.outputs.configured }}
+    steps:
+      - id: key
+        env:
+          SOLARI_API_KEY: ${{ secrets.SOLARI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -n "$SOLARI_API_KEY" ] && [ -n "$ANTHROPIC_API_KEY" ]; then
+            printf 'configured=true\n' >>"$GITHUB_OUTPUT"
+          else
+            printf 'configured=false\n' >>"$GITHUB_OUTPUT"
+            printf '::warning::SOLARI_API_KEY or ANTHROPIC_API_KEY is not configured; the live-ops night was skipped, not passed.\n'
+          fi
+
+  live-ops:
+    needs: guard
+    if: ${{ needs.guard.outputs.configured == 'true' }}
+    runs-on: ubuntu-latest
+    # Four cases in sequence, the evals the longest of them at up to ninety
+    # minutes on their own night; the script stops any one case at
+    # forty-five and reports it errored.
+    timeout-minutes: 180
+    env:
+      SOLARI_API_KEY: ${{ secrets.SOLARI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      # The target the night is held to, the same figure as in
+      # docs/RELEASE-CHECKLIST.md. A dispatch may set it; the schedule takes
+      # the default.
+      LIVE_OPS_COST_TARGET_USD: ${{ inputs.cost_target_usd || '5' }}
+      # Where the night leaves its report and the record it appends to.
+      LIVE_OPS_REPORT_DIR: live-ops
+      # The real-site watch suite, once a site has been onboarded; until then
+      # the watch case is reported errored, never skipped.
+      LIVE_OPS_WATCH_SUITE: ${{ vars.LIVE_OPS_WATCH_SUITE }}
+      # The red-night notice goes through the product's own door, so it needs
+      # the product's database and bot token. Left unset, the script says so
+      # in the log and the run's own red status is the notice.
+      DATABASE_URL: ${{ secrets.LIVE_OPS_DATABASE_URL }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      OPS_USER_ID: ${{ vars.OPS_USER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The mission and the evals drive a local headless Chromium against
+      # fixture sites the suites serve themselves; `--with-deps` adds the
+      # shared libraries the runner image does not ship.
+      - run: pnpm browsers --with-deps
+
+      # The runner has a Docker daemon, so the integration cases take the
+      # Testcontainers path and get a throwaway postgres:17-alpine each.
+      - run: node scripts/live-ops.mjs
+
+      # The night's report, its record and each case's own output, whatever
+      # the verdict. The three-night record in docs/RELEASE-CHECKLIST.md is
+      # copied from here by a person, never written by this job.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-ops
+          path: live-ops/
+          if-no-files-found: ignore
+          retention-days: 30

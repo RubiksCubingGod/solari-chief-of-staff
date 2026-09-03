@@ -21,6 +21,7 @@
     "fixtures:dev": "node scripts/fixtures.mjs",
     "browsers": "node scripts/browsers.mjs",
     "clean": "tsc --build --clean",
+    "live-ops": "node scripts/live-ops.mjs",
     "check": "node scripts/check.mjs"
   },
   "devDependencies": {
