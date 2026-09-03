@@ -39,8 +39,9 @@ describe('the control plane every fixture shares', () => {
     // The contract cross-references `mode` to `hostile-mode-surfaces`, which
     // defines modes for pages an engine observes. Fakegym claims them too,
     // with a meaning of its own for `redesign`: the retention step hands the
-    // flow to a partner host. A `redesign`ed booking POST has no specified
-    // meaning, so fakedmv must not claim one.
+    // flow to a partner host. Fakedmv's calendar is a page the slot watch
+    // observes, so the modes wrap it - `redesign` rotates its layout - while
+    // the booking POST, like fakegym's form POSTs, answers JSON in every mode.
     const withMode: string[] = [];
     for (const site of FIXTURE_SITES) {
       const handle = await site.start();
@@ -52,7 +53,7 @@ describe('the control plane every fixture shares', () => {
         await handle.stop();
       }
     }
-    expect(withMode.sort()).toEqual(['fakegym', 'fakenews', 'fakestore']);
+    expect(withMode.sort()).toEqual(['fakedmv', 'fakegym', 'fakenews', 'fakestore']);
   });
 });
 

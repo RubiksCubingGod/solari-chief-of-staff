@@ -8,7 +8,7 @@ import {
   type WatchPatch,
   type WatchRecord,
 } from '@chief-of-staff/core';
-import { observations, tasks, watches, type Database } from '@chief-of-staff/db';
+import { observations, tasks, watches, type Database, type TaskDatabase } from '@chief-of-staff/db';
 import { and, eq } from 'drizzle-orm';
 
 import { columnsOf, toObservationRecord, valuesOf } from './store.js';
@@ -101,10 +101,11 @@ export interface RearmOptions {
  * written and no comparison is made: the next scheduled check has to fetch
  * and extract afresh before anything can trigger, so a stale sighting can
  * never re-arm the reflex on its own. Returns whether a paused row was there
- * to re-arm.
+ * to re-arm. Takes a transaction as readily as the database, so the snipe
+ * consequence can re-arm under the task's row lock.
  */
 export async function rearmWatch(
-  database: Pick<Database, 'db'>,
+  database: { readonly db: TaskDatabase },
   watchId: string,
   options: RearmOptions,
 ): Promise<boolean> {

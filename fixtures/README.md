@@ -43,13 +43,14 @@ never needed resetting to be independent. `reset` is for a test that wants sever
 one instance without paying for another boot.
 
 `POST /__test/mode` is mounted where every mode has a specified meaning: the observation targets,
-and `fakegym`, whose cancellation flow gives `redesign` a meaning of its own (below). Modes are
-defined by `hostile-mode-surfaces` for pages an engine *observes*; there is no specified meaning for
-a `redesign`ed booking POST, so `fakedmv` does not pretend to have one.
+`fakedmv`, whose calendar is the page a slot watch observes, and `fakegym`, whose cancellation flow
+gives `redesign` a meaning of its own (below). Modes are defined by `hostile-mode-surfaces` for
+pages an engine *observes*; a form POST has no layout to rotate and no shell to serve, so on
+`fakedmv` and `fakegym` alike the POSTs answer JSON in every mode.
 
 ## Hostile modes
 
-Any observation target (`fakestore`, `fakenews`), and `fakegym`, can be put into a mode through
+Any observation target (`fakestore`, `fakenews`, `fakedmv`), and `fakegym`, can be put into a mode through
 `POST /__test/mode`, taking effect on the next request to the same URL. `?mode=` on a single
 request overrides for that request only, for manual pokes; it never writes the stored mode. An
 unknown mode is refused with a 400 and the instance keeps the mode it had.
@@ -158,12 +159,19 @@ contested slot is awarded exactly once under concurrency; losers are refused as 
 deliberately distinct from the `transient` refusal that `POST /__test/failure` injects — one means
 re-arm, the other means retry.
 
+The calendar at `GET /appointments` is the page a slot watch observes, so it carries the hostile
+modes above: `blocked` and `hard-blocked` serve the shells, and `redesign` renders the same slots
+as a table with every class and nesting changed. `POST /book` answers JSON in every mode. The seed
+takes `mode` and `escalationToken` beside `slots` and `failureMode`, and `reset` restores all four.
+
 ```routes
 GET /appointments
 POST /book
 GET /__test/state
 POST /__test/seed
 POST /__test/reset
+GET /__test/mode
+POST /__test/mode
 GET /__test/slots
 POST /__test/slots
 DELETE /__test/slots/:id

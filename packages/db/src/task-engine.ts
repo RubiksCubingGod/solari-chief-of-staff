@@ -76,6 +76,15 @@ export interface TaskEngineOptions {
   /** How long a question stays open before the task fails by `timeout`. */
   readonly waitingUserTimeoutMs?: number;
   readonly now?: () => Date;
+  /**
+   * Told the task's id once this worker has settled it: a run that succeeded
+   * or failed, or a question that expired here. A task settled elsewhere - a
+   * decline through a channel, an orphan the sweep finds - does not reach it,
+   * so a caller with consequences to apply keeps a sweep of its own for
+   * those. A hook that throws loses only its own effect; the failure goes on
+   * the trail.
+   */
+  readonly settled?: (taskId: string) => Promise<unknown>;
 }
 
 /**
@@ -124,6 +133,27 @@ export async function runTaskJob(
     outcome = { kind: 'failed', cause: 'error', reason: describe(error) };
   }
   await settle(ledger, options, claim.task, outcome);
+  if (outcome.kind !== 'ask') await afterSettle(ledger, options, claim.task.id);
+}
+
+/**
+ * Runs the caller's settled hook after the row has moved. The task is settled
+ * either way: a hook that throws is recorded as a failed step, so a
+ * consequence that never arrived can be traced to the hook rather than to
+ * the mission.
+ */
+async function afterSettle(ledger: TaskLedger, options: TaskEngineOptions, taskId: string): Promise<void> {
+  if (options.settled === undefined) return;
+  try {
+    await options.settled(taskId);
+  } catch (error: unknown) {
+    const failure: StepEventPayload = {
+      name: 'settled_hook',
+      outcome: 'failed',
+      detail: describe(error),
+    };
+    await appendTaskEvent(ledger.db, taskId, 'step', failure);
+  }
 }
 
 async function settle(
@@ -247,7 +277,9 @@ export function registerTaskEngine(options: TaskEngineOptions): JobRegistration 
       runTaskJob(ledger, options, job, jobId),
     );
     await harness.register<TaskTimeoutJob>(TASK_TIMEOUT_QUEUE, async (job) => {
-      await expireQuestion(options.db, job.taskId, job.questionId);
+      if (await expireQuestion(options.db, job.taskId, job.questionId)) {
+        await afterSettle(ledger, options, job.taskId);
+      }
     });
     await harness.register(TASK_RECONCILE_QUEUE, async () => {
       await reconcileTasks(ledger, now());

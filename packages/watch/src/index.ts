@@ -47,4 +47,20 @@ export {
   type SlotTriggerResult,
   type TaskRunEnqueuer,
 } from './slot-trigger.js';
+export {
+  SNIPE_STEP,
+  WATCH_SNIPE_CRON,
+  WATCH_SNIPE_QUEUE,
+  bookingEventFor,
+  outcomeOf,
+  registerSnipeSweep,
+  settleSnipe,
+  settleSnipes,
+  snipeConsequence,
+  snipeStep,
+  type SnipeConsequence,
+  type SnipePorts,
+  type SnipeReport,
+  type SnipeSweepReport,
+} from './snipe.js';
 export { createDrizzleWatchStore } from './store.js';

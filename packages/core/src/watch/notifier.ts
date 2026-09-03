@@ -1,18 +1,21 @@
+import { createHash } from 'node:crypto';
+
 import type { FetchTier, WatchKind } from '../index.js';
 import type { WatchCondition } from './condition.js';
-import type { WatchValue } from './value.js';
+import type { SlotListing, WatchValue } from './value.js';
 
 /**
- * The notifier port: the seam this sprint ends at.
+ * The notifier port: the seam the watch engine ends at.
  *
- * The engine tells a person three things - a watch triggered, a watch is
- * blocked at every tier, a watch has degraded past its healing budget - and it
- * tells them through this interface. The recording double below is what every
- * pipeline proof asserts against; calendar-wiring (s7) implements the port
- * over the bot's outbound door.
+ * The engine tells a person four things - a watch triggered, a watch is
+ * blocked at every tier, a watch has degraded past its healing budget, and
+ * what became of a slot watch's booking - and it tells them through this
+ * interface. The recording double below is what every pipeline proof asserts
+ * against; calendar-wiring (s7) implements the port over the bot's outbound
+ * door.
  */
 
-export const WATCH_EVENT_TYPES = ['triggered', 'blocked', 'degraded'] as const;
+export const WATCH_EVENT_TYPES = ['triggered', 'blocked', 'degraded', 'booking'] as const;
 export type WatchEventType = (typeof WATCH_EVENT_TYPES)[number];
 
 interface WatchEventBase {
@@ -48,7 +51,40 @@ export interface DegradedEvent extends WatchEventBase {
   readonly reason: string;
 }
 
-export type WatchEvent = TriggeredEvent | BlockedEvent | DegradedEvent;
+/** What became of the watch once its booking task ended. */
+export const BOOKING_OUTCOMES = ['booked', 'rearmed', 'paused'] as const;
+export type BookingOutcome = (typeof BOOKING_OUTCOMES)[number];
+
+/**
+ * The outcome of a slot watch's booking: the one message a snipe owes the
+ * person after the sighting. `booked` carries the site's reference and the
+ * watch stays paused, its job done; `rearmed` means the slot went or the
+ * person passed on it and the watch is looking again; `paused` means the
+ * booking failed for a reason a person has to look at, and the watch waits.
+ */
+export interface BookingEvent extends WatchEventBase {
+  readonly type: 'booking';
+  readonly taskId: string;
+  readonly slot: SlotListing;
+  readonly outcome: BookingOutcome;
+  /** The site's confirmation, when the outcome is `booked`. */
+  readonly reference: string | null;
+  readonly reason: string;
+}
+
+export type WatchEvent = TriggeredEvent | BlockedEvent | DegradedEvent | BookingEvent;
+
+/**
+ * The key a booking event is deduplicated by: the watch, the task and what
+ * became of the watch. A task has one outcome, so a consequence applied
+ * twice - by the hook and then the sweep, or by a sweep retried after a
+ * delivery failed - is one event delivered twice.
+ */
+export function bookingDedupKey(watchId: string, taskId: string, outcome: BookingOutcome): string {
+  return createHash('sha256')
+    .update(JSON.stringify([watchId, 'booking', taskId, outcome]))
+    .digest('hex');
+}
 
 export interface NotifierPort {
   notify(event: WatchEvent): Promise<void>;

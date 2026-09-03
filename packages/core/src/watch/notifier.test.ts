@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  BOOKING_OUTCOMES,
   WATCH_EVENT_TYPES,
+  bookingDedupKey,
   createRecordingNotifier,
+  type BookingEvent,
   type TriggeredEvent,
   type WatchEvent,
 } from './notifier.js';
@@ -103,7 +106,44 @@ describe('the recording notifier', () => {
 });
 
 describe('WATCH_EVENT_TYPES', () => {
-  it('names the three things the engine can tell a person', () => {
-    expect(WATCH_EVENT_TYPES).toEqual(['triggered', 'blocked', 'degraded']);
+  it('names the four things the engine can tell a person', () => {
+    expect(WATCH_EVENT_TYPES).toEqual(['triggered', 'blocked', 'degraded', 'booking']);
+  });
+});
+
+describe('the booking event', () => {
+  const booked: BookingEvent = {
+    type: 'booking',
+    watchId: 'watch-1',
+    userId: 'user-1',
+    url: 'http://127.0.0.1:4304/appointments',
+    occurredAt: '2026-09-02T00:02:00.000Z',
+    dedupKey: bookingDedupKey('watch-1', 'task-1', 'booked'),
+    taskId: 'task-1',
+    slot: { id: 'Tue 8 Sep, 09:00', label: 'Tue 8 Sep, 09:00' },
+    outcome: 'booked',
+    reference: 'DMV-000001',
+    reason: 'Tue 8 Sep, 09:00 is booked: reference DMV-000001',
+  };
+
+  it('is recorded like any other event', async () => {
+    const notifier = createRecordingNotifier();
+    await notifier.notify(booked);
+    expect(notifier.eventsFor('watch-1')).toEqual([booked]);
+  });
+
+  it('names the three things that can become of the watch', () => {
+    expect(BOOKING_OUTCOMES).toEqual(['booked', 'rearmed', 'paused']);
+  });
+});
+
+describe('bookingDedupKey', () => {
+  it('is one key per watch, task and outcome, and a different key for any other', () => {
+    const key = bookingDedupKey('watch-1', 'task-1', 'booked');
+    expect(key).toMatch(/^[0-9a-f]{64}$/u);
+    expect(bookingDedupKey('watch-1', 'task-1', 'booked')).toBe(key);
+    expect(bookingDedupKey('watch-1', 'task-1', 'rearmed')).not.toBe(key);
+    expect(bookingDedupKey('watch-1', 'task-2', 'booked')).not.toBe(key);
+    expect(bookingDedupKey('watch-2', 'task-1', 'booked')).not.toBe(key);
   });
 });

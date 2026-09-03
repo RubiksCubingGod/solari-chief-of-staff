@@ -28,6 +28,7 @@ import { enqueueTaskRun, type Database, type JobRegistration } from '@chief-of-s
 import { fetchWatchPage, type FetchLadder } from './fetch/ladder.js';
 import { registerWatchScheduler, type WatchCheck } from './scheduler.js';
 import { createDrizzleSlotTrigger, type SlotTriggerPort, type SlotTriggerResult } from './slot-trigger.js';
+import { registerSnipeSweep } from './snipe.js';
 import { createDrizzleWatchStore } from './store.js';
 
 /**
@@ -253,7 +254,11 @@ export interface WatchEngineOptions {
   readonly now?: () => Date;
 }
 
-/** The whole engine as one registration: the scheduler with the real check behind it. */
+/**
+ * The whole engine as one registration: the scheduler with the real check
+ * behind it, and the snipe sweep that settles a slot watch whose booking task
+ * ended without this worker's task engine there to say so.
+ */
 export function registerWatchEngine(options: WatchEngineOptions): JobRegistration {
   const store = createDrizzleWatchStore(options.db);
   return async (harness) => {
@@ -271,5 +276,10 @@ export function registerWatchEngine(options: WatchEngineOptions): JobRegistratio
       ...(options.now === undefined ? {} : { now: options.now }),
     };
     await registerWatchScheduler({ db: options.db, store, check: createWatchCheck(ports) })(harness);
+    await registerSnipeSweep({
+      db: options.db,
+      notifier: options.notifier,
+      ...(options.now === undefined ? {} : { now: options.now }),
+    })(harness);
   };
 }

@@ -90,6 +90,7 @@ async function startEngine(
     readonly retryPolicy?: RetryPolicy;
     readonly waitingUserTimeoutMs?: number;
     readonly schema?: string;
+    readonly settled?: (taskId: string) => Promise<unknown>;
   } = {},
 ): Promise<Engine> {
   const schema = options.schema ?? `pgboss_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
@@ -107,6 +108,7 @@ async function startEngine(
     ...(options.waitingUserTimeoutMs === undefined
       ? {}
       : { waitingUserTimeoutMs: options.waitingUserTimeoutMs }),
+    ...(options.settled === undefined ? {} : { settled: options.settled }),
   };
   await harness.start();
   await registerTaskEngine(engineOptions)(harness);
@@ -333,6 +335,77 @@ describe('the task lifecycle', () => {
       questionId: question.questionId,
       reply: 'GYM-123456',
       answeredAt: expect.any(String) as string,
+    });
+  });
+
+  it('tells the settled hook the id once a run has settled the task, and not while it is parked', async () => {
+    const settled: string[] = [];
+    const engine = await startEngine({
+      settled: (taskId) => {
+        settled.push(taskId);
+        return Promise.resolve();
+      },
+    });
+    const task = await createTask();
+    behaviours.set(task.id, (context) =>
+      Promise.resolve(
+        context.answers.length === 0 ? { kind: 'ask', question: 'Go on?' } : { kind: 'succeeded' },
+      ),
+    );
+
+    await enqueue(engine, task.id);
+    await waitForStatus(task.id, 'waiting_user');
+    expect(settled).toEqual([]);
+
+    const question = pendingQuestion(await timelineOf(task.id));
+    if (question === undefined) throw new Error('no pending question');
+    await answerTask(engine.ledger, task.id, { questionId: question.questionId, reply: 'yes' });
+    await waitForStatus(task.id, 'succeeded');
+
+    await vi.waitFor(() => {
+      expect(settled).toEqual([task.id]);
+    });
+    // Nothing on the trail for a hook that did its job.
+    expect(trail(await timelineOf(task.id)).at(-1)).toBe('transition:succeeded');
+  });
+
+  it('tells the settled hook when a question expires here', async () => {
+    const settled: string[] = [];
+    const engine = await startEngine({
+      waitingUserTimeoutMs: 1_500,
+      settled: (taskId) => {
+        settled.push(taskId);
+        return Promise.resolve();
+      },
+    });
+    const task = await createTask();
+    behaviours.set(task.id, () => Promise.resolve({ kind: 'ask', question: 'Proceed?' }));
+
+    await enqueue(engine, task.id);
+    await waitForStatus(task.id, 'failed');
+
+    await vi.waitFor(() => {
+      expect(settled).toEqual([task.id]);
+    });
+  });
+
+  it('puts a settled hook that throws on the trail, with the task settled all the same', async () => {
+    const engine = await startEngine({
+      settled: () => Promise.reject(new Error('the watch table was unreachable')),
+    });
+    const task = await createTask();
+
+    await enqueue(engine, task.id);
+    await waitForStatus(task.id, 'succeeded');
+
+    await vi.waitFor(async () => {
+      const timeline = await timelineOf(task.id);
+      expect(trail(timeline)).toEqual(['transition:started', 'transition:succeeded', 'step']);
+      expect(timeline.events.at(-1)?.payload).toEqual({
+        name: 'settled_hook',
+        outcome: 'failed',
+        detail: 'the watch table was unreachable',
+      });
     });
   });
 
