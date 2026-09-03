@@ -86,6 +86,33 @@
 - Resumed 04:27Z on agentic-mode's lint fix (its eval modules written; `dabd815` repairs build:web). Gate re-run 04:28Z-04:57Z: lint, typecheck and typecheck:tests passed; the test phase went red from Postgres contention on the shared 55432 server (32 pg-boss `Connection terminated due to connection timeout`, `timeout exceeded when trying to connect`, integration suites at 24 minutes, 22 timeouts in 11 files including `auto-cancel.integration.test.ts`, which passes alone), coinciding with agentic-mode's integration runs on the same server. Finished with both findings (`telegram-roundtrip-live`: no token here; `telegram-roundtrip-gate`: contention). Re-earn: `nah verify calendar-wiring telegram-roundtrip telegram-roundtrip-gate --retry` in a quiet window, and keep every other vitest run off 55432 while any gate runs.
 - `telegram-roundtrip` finished at `7c4c2fa` (with findings) at 05:00Z; all four tasks are done. Remaining before `nah stage implementation-complete calendar-wiring`: re-earn `telegram-roundtrip-gate` and `auto-cancel-enqueue-gate` with `nah verify ... --retry`, and re-earn `daily-scan-reminders`' stale green and gate with a bare `nah task finish calendar-wiring daily-scan-reminders`, three serialized gates in one quiet window (about 90 minutes). The window opens when agentic-mode reports its two back-to-back gates (mission-e2e, eval-scenarios) have exited; its eval-gate runs after the window, so message it when the last gate here ends. `implementation-complete` refreshes stale proofs itself and then `nah verify` refuses until hardening, so the re-earning comes first.
 
+## 2026-09-03 · implementation complete · hardening requested
+
+### What happened
+
+- At 05:22Z `nah implement calendar-wiring` was re-run to get a live attempt back after the typed suspension had ended the first one (`stage-attempt-terminal`, outcome `suspended`). With all four tasks done, NAH recorded an automatic replan (`7984ac0`, one planning-ready event, no graph change), adopted a new attempt, accepted the findings below as non-blocking, requested hardening (`hardening-ha5fce7ce328a4b38`) and completed the attempt, all without running a proof. The gate re-earning planned for the quiet window therefore belongs to hardening. Agentic-mode was handed the coverage tree at 05:25Z for its eval-gate.
+
+### Findings handed to hardening
+
+- Stale greens: `calendar-semantics-green` (`packages/core/src/calendar/dates.ts` changed after verification), `daily-scan-reminders-green` (`packages/core/src/calendar/message.ts`), `auto-cancel-enqueue-green` (`packages/bot/src/index.ts`). Each changed under a later task in this sprint; the suites pass on the current tree (the reminder and auto-cancel suites ran green during the telegram-roundtrip greens at 05:20Z).
+- Red gates: `auto-cancel-enqueue-gate` (03:47Z, 12 timeouts in 5 files under a sibling's concurrent coverage run) and `telegram-roundtrip-gate` (04:57Z, 22 timeouts in 11 files from Postgres contention on the shared 55432 server). Neither is a logic failure; slot-sniping's quiet gate over this tree at `a0e76a0` was green with 1509 tests. `daily-scan-reminders-gate` (2026-09-02 21:25Z) predates the later tasks and is stale.
+- Missing: `telegram-roundtrip-live`, which needs the owner's `TELEGRAM_BOT_TOKEN`, `TELEGRAM_LIVE_CHAT_ID` and a phone; `node scripts/live-telegram.mjs` (README, "The live Telegram round-trip").
+
+### For the hardening session
+
+- Open with `nah harden calendar-wiring`. Inside the attempt, a bare `nah task finish calendar-wiring <task>` re-earns a done task's stale proofs, and `nah verify calendar-wiring <task> <proof> --retry` re-records a red gate. Run the three gates one at a time in a quiet window: no other vitest against 55432 while any gate runs, `coverage/.tmp` empty before starting, about 30 minutes each on a quiet box, `TEST_DATABASE_URL=postgres://postgres:nahtest@127.0.0.1:55432/postgres` set in the launching call. Agentic-mode's eval-gate is running from 05:25Z; message that session (`chief-of-staff-4b`) before the first gate.
+- The hardening result goes to `nah lifecycle assurance calendar-wiring` on stdin.
+
+### Automatic replan (recorded for the trace)
+
+- Commander's intent: unchanged, calendar subscriptions and deadlines from chat or dashboard, daily reminders, auto-cancel behind a confirm gate, and the live Telegram round-trip.
+- Current plan: the four-task graph, unchanged.
+- What changed: only the ledger documents (HANDOFF, DEFERRED) since the planning revision; the replan re-recorded planning-ready over them.
+- What breaks: nothing in the graph; the proof ledger carries the stale and red receipts above.
+- Proposed solution: re-earn in hardening as described.
+- Patterns used: the same proof shapes (red, green, rules, gate) and the serialized-gate protocol between sessions.
+- Graph and proof delta: none.
+
 <!-- nah-checkpoint:7337cfa37c3fd896 -->
 ## 2026-09-02T20:41:14.564Z · claude-code · b8abf8c9-a507-44ba-9b6c-8d7931dcac38
 
