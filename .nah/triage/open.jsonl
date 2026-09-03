@@ -1,1 +1,0 @@
-{"schema_version":1,"id":"auth-guard-suite-strict-mode-violation-on-getbyrole-alert-under-gate-load","summary":"auth-guard suite strict-mode violation on getByRole alert under gate load","repro":"node scripts/check.mjs","filed_at":"2026-09-03T05:43:37.870Z","filed_by":"RubiksCubingGod","project_id":"chief-of-staff"}
