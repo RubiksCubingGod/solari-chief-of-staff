@@ -148,7 +148,7 @@ describe('a reminder, end to end', () => {
     // The next hour's scan, on the same day.
     const again = await runCalendarScan({ db: app.db, send, now: LEAD_DAY_AFTERNOON });
 
-    expect(again).toEqual({ due: 1, delivered: 0, late: 0, failed: 0, skipped: 0 });
+    expect(again).toEqual({ due: 1, delivered: 0, late: 0, failed: 0, skipped: 0, enqueued: 0, unlinked: 0, settled: 0 });
     expect(transport.sent()).toHaveLength(1);
     expect(await harness.schedules(CALENDAR_SCAN_QUEUE)).toHaveLength(1);
   });
@@ -171,7 +171,7 @@ describe('a reminder, end to end', () => {
 
     const report = await runCalendarScan({ db: app.db, send, now: LEAD_DAY_AFTERNOON });
 
-    expect(report).toEqual({ due: 1, delivered: 0, late: 0, failed: 1, skipped: 0 });
+    expect(report).toEqual({ due: 1, delivered: 0, late: 0, failed: 1, skipped: 0, enqueued: 0, unlinked: 0, settled: 0 });
     expect(transport.sent()).toEqual([]);
     const [delivery] = await app.db.select().from(deliveries);
     expect(delivery).toMatchObject({ status: 'failed' });
@@ -194,7 +194,7 @@ describe('a reminder, end to end', () => {
       now: LEAD_DAY_AFTERNOON,
     });
 
-    expect(report).toEqual({ due: 1, delivered: 0, late: 0, failed: 0, skipped: 1 });
+    expect(report).toEqual({ due: 1, delivered: 0, late: 0, failed: 0, skipped: 1, enqueued: 0, unlinked: 0, settled: 0 });
     expect(transport.calls).toEqual([]);
     expect(await app.db.select().from(deliveries)).toEqual([]);
     const [reminder] = await app.db.select().from(calendarReminders);

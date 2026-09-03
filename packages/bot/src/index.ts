@@ -12,6 +12,12 @@ export {
   type BotTransport,
   type RateLimitPolicy,
 } from './config.js';
+export {
+  TELEGRAM_LIVE_CHAT_VARIABLE,
+  TELEGRAM_LIVE_FLAG,
+  TELEGRAM_TOKEN_VARIABLE,
+  liveTelegramSkipReason,
+} from './live-telegram.js';
 export { createNoticeGate, type NoticeGate } from './notice-gate.js';
 export {
   DEFAULT_SEND_RETRY_POLICY,

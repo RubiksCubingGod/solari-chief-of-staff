@@ -17,6 +17,7 @@
     "migrate": "node scripts/migrate.mjs",
     "start": "node scripts/server.mjs",
     "worker": "node scripts/worker.mjs",
+    "bot": "node scripts/bot.mjs",
     "fixtures:dev": "node scripts/fixtures.mjs",
     "browsers": "node scripts/browsers.mjs",
     "clean": "tsc --build --clean",

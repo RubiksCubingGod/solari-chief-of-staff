@@ -6,7 +6,14 @@ import {
   liveLlmSkipReason,
 } from '@chief-of-staff/agent';
 import { ConfigError, loadConfig } from '@chief-of-staff/api';
-import { BOT_TRANSPORTS, BotConfigError, loadBotConfig } from '@chief-of-staff/bot';
+import {
+  BOT_TRANSPORTS,
+  BotConfigError,
+  TELEGRAM_LIVE_CHAT_VARIABLE,
+  TELEGRAM_LIVE_FLAG,
+  liveTelegramSkipReason,
+  loadBotConfig,
+} from '@chief-of-staff/bot';
 import {
   TEST_DATABASE_URL_VARIABLE,
   TEST_POSTGRES_STARTERS,
@@ -179,5 +186,17 @@ describe('.env.example', () => {
     // A file that named the variables without saying they cost money would be
     // documentation that reads as an invitation.
     expect(liveLlmSkipReason(documented)).toContain(LIVE_LLM_FLAG);
+  });
+
+  it('leaves both halves of the live Telegram opt-in blank', () => {
+    for (const variable of [TELEGRAM_LIVE_FLAG, TELEGRAM_LIVE_CHAT_VARIABLE]) {
+      expect(Object.keys(documented), variable).toContain(variable);
+      // Blank for the reason the pairs above are: a flag filled in here would
+      // make every ordinary `pnpm check` on this machine message a phone, and
+      // a chat id filled in here would be somebody's.
+      expect(documented[variable], variable).toBe('');
+    }
+    // The gate reads the file as shut, and names the opt-in as the missing half.
+    expect(liveTelegramSkipReason(documented)).toContain(TELEGRAM_LIVE_FLAG);
   });
 });

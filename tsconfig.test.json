@@ -11,6 +11,9 @@
       "@chief-of-staff/db/testing": [
         "./packages/db/src/testing/postgres.ts"
       ],
+      "@chief-of-staff/fixtures": [
+        "./fixtures/src/index.ts"
+      ],
       "@chief-of-staff/*": [
         "./packages/*/src/index.ts"
       ]

@@ -55,10 +55,11 @@ passes here it passes there.
 | `pnpm browsers` | Downloads the pinned Chromium the browser provider drives. |
 | `pnpm start` | Runs the API server on `HOST` and `PORT`. |
 | `pnpm worker` | Runs the job worker: checks watches on their schedules, reconciles the schedule set once a minute, runs queued tasks through their playbooks in a guarded browser, and scans the calendar every hour for reminders to send over Telegram and for flagged subscriptions to cancel ahead of their renewal, behind a yes over Telegram. |
+| `pnpm bot` | Runs the Telegram bot: long-polls for messages, writes the transcript, and carries a reply from someone a task is waiting on back to that task. |
 | `pnpm clean` | Removes build output. |
 
-`pnpm start` and `pnpm worker` are the two long-running processes: one
-deployable unit runs both against the same Postgres (ARCHITECTURE §2). Each
+`pnpm start`, `pnpm worker` and `pnpm bot` are the three long-running
+processes: one deployable unit runs all of them against the same Postgres (ARCHITECTURE §2). Each
 prints what it bound or started, and shuts down on `SIGTERM` — finishing the
 request or the job it is already handling before the process exits.
 
@@ -86,9 +87,40 @@ no ends the task without running any of it, and anything else is asked
 again. When the task ends, the entry is marked with what became of it -
 handled, declined, or what went wrong - and a flagged entry with no playbook
 or no connected site is marked `needs_attention` with the reason instead of
-becoming a task. Each renewal is armed once, however many scans see it. The
-bot carries replies back: a message from someone a task is waiting on is
-handed to that task rather than to the assistant.
+becoming a task. Each renewal is armed once, however many scans see it. `pnpm bot`
+carries replies back: a message from someone a task is waiting on is handed
+to that task rather than to the assistant. The assistant itself is not on
+that process yet - the credential the chat tools present to the API is the
+seam `packages/agent/src/crud.ts` names as undecided - so an ordinary
+message is answered with a sentence saying so, and every reply to a waiting
+task is carried.
+
+## The live Telegram round-trip
+
+Every proof above answers Telegram at the API transformer and plays the
+person from a script. One suite reaches a real phone instead:
+`tests/live-telegram.integration.test.ts` composes the worker and the bot
+the way `pnpm worker` and `pnpm bot` do, sends a real reminder, arms a real
+cancellation on the fakegym fixture, and waits for the yes - and then the
+gym's confirmation code - to come back from the phone. It skips, with the
+reason in its name, unless it is run on purpose:
+
+1. Put the bot's token from @BotFather in `.env` as `TELEGRAM_BOT_TOKEN`.
+   It is never in `.env.example`.
+2. Send the bot a message from the phone, then put that chat's id in `.env`
+   as `TELEGRAM_LIVE_CHAT_ID`: the `id` under `message.chat` at
+   `https://api.telegram.org/bot<token>/getUpdates`, or `telegram_chat_id`
+   on the bound user's row once a chat has bound with `/start <code>`.
+3. Stop any `pnpm bot` running on the same token - Telegram allows one
+   poller - and make sure the pinned Chromium is installed (`pnpm browsers`).
+4. Run `node scripts/live-telegram.mjs` with the phone in hand. It refuses
+   to run without both values rather than skipping, because a skipped suite
+   exits zero. The phone gets a reminder, then the question; reply `yes`.
+   The terminal then prints the gym's code; reply with it. Each answer has
+   five minutes, after which the task times out and the run fails honestly.
+5. The run ends with one JSON line, `live_telegram_roundtrip`, recording
+   when it ran, the task, the questions asked and the replies carried. Paste
+   it into the sprint's handoff: that line is the record of the run.
 
 To change the schema, edit `packages/db/src/schema.ts`, then run
 `pnpm --filter @chief-of-staff/db generate` to write a new migration, and
