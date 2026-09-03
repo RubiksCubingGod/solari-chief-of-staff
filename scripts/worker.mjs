@@ -63,13 +63,17 @@ async function run() {
   // here.
   const provider = solari.createLocalProvider();
   const ladder = watch.createFetchLadder({ provider });
-  const creator = extractorCreator(agent);
+  // The vendor client, read once for the two things that want it: the
+  // extractor writer, and the agentic mission behind the playbooks.
+  const anthropic = anthropicClient(agent);
+  const creator = extractorCreator(agent, anthropic);
   // Every event is one JSON line on stdout until a delivery channel lands.
   const notifier = watch.createLogNotifier();
   // Every playbook-mode task goes through the runner, on the same provider.
   // Two playbooks so far - the fakegym cancellation and the fakedmv booking
   // a slot watch arms - each at the origin where its fixture listens on this
-  // machine. Every other task is refused in a sentence rather than run. A
+  // machine. Every other task runs the
+  // agentic mission, or is refused in a sentence without a vendor key. A
   // question for a person goes over Telegram when the bot's token is set,
   // and is one JSON line on stdout, like the events, when it is not.
   const registry = playbooks.createPlaybookRegistry([
@@ -83,7 +87,12 @@ async function run() {
   // Behind the confirm gate: a task whose input carries a question - every
   // cancellation the calendar arms - runs only after a yes to it.
   const mission = db.withConfirmation(
-    playbooks.createPlaybookMission({ db: database.db, provider, registry }),
+    playbooks.createPlaybookMission({
+      db: database.db,
+      provider,
+      registry,
+      ...agenticFallback(playbooks, anthropic, database, provider),
+    }),
   );
   // What a booking task's ending does to its watch - booked stays paused, a
   // slot that went or a person who passed re-arms, anything else waits for a
@@ -159,19 +168,31 @@ function calendarScan({ sendToUser, bot, db, playbooks, database, registry }) {
 }
 
 /**
- * The extractor writer, or its absence spelled out. Without a key the worker
- * still runs: watches that already have an extractor are checked as before,
- * and a watch that needs one is parked with this reason in its row, where
- * the person who can fix it will read it.
+ * The vendor client, or its absence spelled out once. Two things want it:
+ * the extractor writer for new watches, and the agentic mission that runs a
+ * task no playbook claims. Without a key the worker still runs, and each of
+ * the two says what it cannot do where the person who can fix it will read
+ * it: the watch's row, the task's trail.
  */
-function extractorCreator(agent) {
+function anthropicClient(agent) {
   const apiKey = process.env['ANTHROPIC_API_KEY']?.trim();
   if (apiKey !== undefined && apiKey !== '') {
-    return agent.createExtractorCreator({ client: agent.createAnthropicClient(apiKey) });
+    return agent.createAnthropicClient(apiKey);
   }
   process.stderr.write(
-    'worker: ANTHROPIC_API_KEY is not set, so no extractor can be written; watches that already have one are still checked\n',
+    'worker: ANTHROPIC_API_KEY is not set, so no extractor can be written and a task no playbook claims is refused; watches that already have an extractor are still checked\n',
   );
+  return undefined;
+}
+
+/**
+ * The extractor writer, or a stand-in that parks every watch needing one
+ * with the reason in its row.
+ */
+function extractorCreator(agent, client) {
+  if (client !== undefined) {
+    return agent.createExtractorCreator({ client });
+  }
   return {
     create: () =>
       Promise.resolve({
@@ -180,4 +201,23 @@ function extractorCreator(agent) {
         reason: 'ANTHROPIC_API_KEY is not set on the worker, so no extractor can be written',
       }),
   };
+}
+
+/**
+ * The mission behind the playbooks: a task no playbook claims runs a Claude
+ * tool loop over the browser, under the same guardrails and on the same
+ * provider, with its cost written to the task. Without a key such a task is
+ * failed with the reason, rather than handed to a fallback that is not there.
+ */
+function agenticFallback(playbooks, client, database, provider) {
+  if (client === undefined) {
+    return {
+      fallback: () =>
+        Promise.resolve({
+          kind: 'failed',
+          reason: 'ANTHROPIC_API_KEY is not set on the worker, so a task no playbook claims cannot run',
+        }),
+    };
+  }
+  return { fallback: playbooks.createAgenticMission({ db: database.db, provider, client }) };
 }
