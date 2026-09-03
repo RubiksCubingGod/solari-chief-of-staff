@@ -4,6 +4,7 @@ import type {
   FetchTier,
   TaskEventType,
   TaskKind,
+  TaskLlmUsage,
   TaskMode,
   TaskStatus,
   TierPolicy,
@@ -76,6 +77,8 @@ export interface Task {
   readonly solariSessionId: string | null;
   readonly recordingUrl: string | null;
   readonly result: unknown;
+  /** What the agentic mission spent on the model, or null for a task that never called one. */
+  readonly llmUsage: TaskLlmUsage | null;
   readonly createdAt: string;
   readonly finishedAt: string | null;
 }

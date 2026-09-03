@@ -35,6 +35,7 @@ function detail(overrides: Partial<TaskDetail> = {}): TaskDetail {
     solariSessionId: null,
     recordingUrl: null,
     result: null,
+    llmUsage: null,
     createdAt: '2026-08-30T10:00:00.000Z',
     finishedAt: '2026-08-30T10:05:00.000Z',
     events: [],
