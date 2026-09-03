@@ -45,11 +45,11 @@ import {
   createScriptedModel,
   declare,
   refOf,
-  script,
   useTool,
   type ModelPolicy,
   type ModelRequest,
   type ScriptedModel,
+  type ScriptedTurn,
 } from './agentic/testing/scripted-model.js';
 import { fakegymCancellation } from './fakegym/cancellation.js';
 import {
@@ -191,7 +191,8 @@ async function startWorker(options: WorkerOptions): Promise<Worker> {
     provider,
     client,
     credentials: memberPassword,
-    actionTimeoutMs: 1_500,
+    // Generous, because the suite runs beside the rest of the gate: a slow click is not what it measures.
+    actionTimeoutMs: 5_000,
     navigationTimeoutMs: 30_000,
   });
   const registry = createPlaybookRegistry([fakegymCancellation({ origin: gym.url })]);
@@ -272,6 +273,43 @@ function typedTexts(timeline: TaskTimeline): unknown[] {
   });
 }
 
+/** How many fresh digests a step may ask for before its label is given up on. */
+const READS_PER_STEP = 3;
+
+/**
+ * The model's turns in order, like `script`, except that a step whose label
+ * is not yet in any digest reads the page again, a few times, before giving
+ * up. A site under load answers a click after the settle window has closed,
+ * and a live model would read again on finding the old page; the scripted
+ * one has to be told to. Any other failure in a step is the step's own.
+ * (The evals keep the same sequencer in `agentic/eval/scenarios.ts`.)
+ */
+function patiently(...steps: readonly (ScriptedTurn | ModelPolicy)[]): ModelPolicy {
+  let next = 0;
+  let reads = 0;
+  return (request) => {
+    const step = steps[next];
+    if (step === undefined) {
+      throw new Error(`the script has ${String(steps.length)} turns and was asked for turn ${String(next + 1)}`);
+    }
+    if (typeof step !== 'function') {
+      next += 1;
+      return step;
+    }
+    try {
+      const turn = step(request);
+      next += 1;
+      reads = 0;
+      return turn;
+    } catch (error) {
+      const notShown = error instanceof Error && error.message.startsWith('no element labelled');
+      if (!notShown || reads >= READS_PER_STEP) throw error;
+      reads += 1;
+      return useTool('read', {});
+    }
+  };
+}
+
 /* The model's scripts. Every ref is read off the digest the model was last shown, never a selector. */
 
 const signIn: readonly ModelPolicy[] = [
@@ -310,7 +348,7 @@ function codeFromBrief(request: ModelRequest): string {
  * progress per session - through it.
  */
 const cancellation = (): ModelPolicy =>
-  script(
+  patiently(
     ...signIn,
     ...throughTheSteps,
     ask(CODE_QUESTION),
@@ -366,7 +404,10 @@ describe('the whole cancellation', () => {
     // runs went through the registry, and both said why they fell through.
     const unmatched = { name: 'playbook', outcome: 'unmatched', detail: { reason: 'no playbook for cancel on gym' } };
     expect(steps(timeline, 'playbook')).toEqual([unmatched, unmatched]);
-    expect(steps(timeline).map((step) => step.name).filter((name) => name.startsWith('tool:'))).toEqual([
+    // A `read` the script asked for while the site caught up is the one call that may come between.
+    const toolSteps = steps(timeline).map((step) => step.name).filter((name) => name.startsWith('tool:'));
+    const reads = toolSteps.filter((name) => name === 'tool:read').length;
+    expect(toolSteps.filter((name) => name !== 'tool:read')).toEqual([
       ...TOOLS_TO_THE_GATE,
       'tool:ask_user',
       ...TOOLS_TO_THE_GATE,
@@ -377,16 +418,17 @@ describe('the whole cancellation', () => {
     expect(typedTexts(timeline)).toEqual([MEMBER.email, '[redacted]', MEMBER.email, '[redacted]', code]);
     expect(JSON.stringify(timeline.events)).not.toContain(MEMBER.password);
 
-    // Every answered call was charged, both sessions onto the one row.
-    expect(steps(timeline, 'llm')).toHaveLength(26);
-    expect(timeline.task.llmUsage).toMatchObject({ model: 'claude-opus-5', calls: 26 });
+    // Every answered call was charged, both sessions onto the one row: the script's 26 turns, and one for every read.
+    expect(steps(timeline, 'llm')).toHaveLength(26 + reads);
+    expect(timeline.task.llmUsage).toMatchObject({ model: 'claude-opus-5', calls: 26 + reads });
     expect(timeline.task.llmUsage?.inputTokens).toBeGreaterThan(0);
     expect(timeline.task.llmUsage?.costUsd).toBeGreaterThan(0);
 
     // The resumed mission was told what the person said and what had been done before the pause.
     const requests = worker.model?.requests() ?? [];
-    expect(requests).toHaveLength(26);
-    const resumed = requests[12]?.brief ?? '';
+    expect(requests).toHaveLength(26 + reads);
+    // The first request of the second session: the one right after the person answered.
+    const resumed = requests.find((request) => request.brief.includes(`A: ${code}`))?.brief ?? '';
     expect(resumed).toContain(`Q: ${CODE_QUESTION}`);
     expect(resumed).toContain(`A: ${code}`);
     expect(resumed).toContain('Earlier in this task, the tools were used like this:');
@@ -400,7 +442,7 @@ describe('the hostile modes', () => {
   it('ends blocked when the site serves its challenge to the browser, and the membership stands', async () => {
     await gym.control.setMode('hard-blocked');
     const worker = await startWorker({
-      policy: script(
+      policy: patiently(
         () => useTool('navigate', { url: loginUrl() }),
         declare('blocked', 'the site shows a "Checking your browser" challenge and no sign-in form'),
       ),
@@ -423,7 +465,7 @@ describe('the hostile modes', () => {
   it('may ask the person for help with the challenge first, and ends blocked when they cannot', async () => {
     await gym.control.setMode('hard-blocked');
     const worker = await startWorker({
-      policy: script(
+      policy: patiently(
         () => useTool('navigate', { url: loginUrl() }),
         ask(CHALLENGE_QUESTION),
         () => useTool('navigate', { url: loginUrl() }),
@@ -470,7 +512,7 @@ describe('the hostile modes', () => {
   it('refuses to follow the redesigned site to its partner host, and the membership stands', async () => {
     await gym.control.setMode('redesign');
     const worker = await startWorker({
-      policy: script(
+      policy: patiently(
         ...signIn,
         (request) => useTool('click', { ref: refOf(request, 'Cancel membership') }),
         (request) => useTool('click', { ref: refOf(request, 'Continue cancelling') }),
