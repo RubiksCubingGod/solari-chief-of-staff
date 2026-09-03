@@ -32,6 +32,7 @@ if that had been done.
 | A public library, clinic or municipal booking page | `slots` | `http` | usually plain server-rendered HTML with permissive robots; the kind of page the product exists for | slots may be rare, so a green run can take days to see a trigger |
 | A software vendor's pricing page | `digest` | `http` | static, cheap, changes rarely; proves the change watch and costs nothing | a change may never come during the trial window |
 | A second-hand marketplace search for one item | `price` | `browser` or `stealth` | the most useful watch to a real person | the terms of most marketplaces forbid automated reading; expected to fail step 1 |
+| An online travel agency's flight search results page | `price` | `browser` or `stealth` | a fare the person is actually waiting on; a real drop is worth a notification | **failed step 1 on 2026-09-03**: www.expedia.com's robots file disallows `/Flights-Search` under `User-agent: *` (`records/www.expedia.com.md`); orbitz.com and travelocity.com carry the same rule, and the legal pages answer 429 to a plain fetch |
 
 ## How to use this file
 

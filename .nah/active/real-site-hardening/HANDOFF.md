@@ -118,3 +118,25 @@ Live workflow pattern (schedule + dispatch only, guard job on secrets, no-cancel
 - Assurance request: none
 - Knowledge revisions: none
 - Resume: `nah implement s9`
+
+<!-- nah-checkpoint:b90cb3089d6ea5e0 -->
+## 2026-09-03T14:58:52.033Z · claude-code · 2fea5afc-72e1-4d82-80fc-77eeb110f12e
+
+- Stage: implementation
+- Ready: none
+- In progress: none
+- Root blockers: none
+- Done: 4/9
+- Receipts: verification-completed-event27c0cf47759a458ebfb975ab08e0c76c, verification-completed-event5d0d019a19954279aaa9988d588e3adc, verification-completed-event78e8829d84644624b0c32a042919e278, verification-completed-eventbd5683f3a7df4ff4a70cf8edc95795eb, verification-completed-event5e945236de4645448b1b98086fbd27c3, verification-completed-event134afa29f12947b5b6c2b7c95d496264, verification-completed-event0ea549392c6a44cc9e74b63d936138b3, verification-completed-event920c32fa9ed441a4aaee9334d8d28a2e, verification-completed-event425cb7707b6d41e4ad1543fb29411d00, verification-completed-eventc7643f3a47d54494bca984644fc6bead, verification-completed-event819249cadbac41609c145cade99c8de9, verification-completed-event98c31b008373480498e6b47bf6c47029, verification-completed-eventa0549c25289b4c6e81c4b7a86e5c1b95, verification-completed-eventbf6324a8bf4f4aaea860042caf7c13c3, verification-completed-eventd094302240af45c49a28a8852f13d0bf, verification-completed-event8a38b70b423645f2857ccc7ef7615918, verification-completed-eventebab3e8599894a39b90d24597fd69cbb, verification-completed-eventb011c448d2c24c83a24af4aa09617675, verification-completed-event0ed145469d0341368f08f6f4a92fde09, verification-completed-event1ec23877065f4ec9bbfacb2af03965ef
+- Findings: none
+- Assurance request: none
+- Knowledge revisions: none
+- Resume: `nah implement s9`
+
+## 2026-09-03T10:55:00Z · site-onboarding: first candidate failed step 1 · 2fea5afc-72e1-4d82-80fc-77eeb110f12e
+
+- This session adopted the implementation attempt (attempt-rcce3cd6f29e44d748560334f25e739b4) after the earlier session (fd0bcdfa) suspended. Frontier unchanged: site-onboarding attestation-ready behind the decision gate, four tasks gated behind it; `nah task update --status in_progress` is refused for an attestation-ready task, so the evidence tasks are never in_progress.
+- Aarav named the first site: Expedia's flight search (round trip CHO to LAS, 17 to 24 September 2026, one adult, economy, price target 675 dollars). The procedure ended at step 1: `https://www.expedia.com/robots.txt` disallows `/Flights-Search` under `User-agent: *` (orbitz.com and travelocity.com carry the same rule). The record is `docs/onboarding/records/www.expedia.com.md`, every later field marked not applicable; the shortlist in `docs/onboarding/CANDIDATES.md` has the line with the failure note. The page was never fetched. The terms clause could not be quoted: the legal pages answer 429 to a plain fetch and no browser session was connected.
+- Secrets for the nightly: `SOLARI_API_KEY` is a repository secret (since 2026-09-01) and in `.env`; `ANTHROPIC_API_KEY` is neither a secret nor in `.env` nor in the environment, so the guard job would report every night skipped. Variables `LIVE_OPS_WATCH_SUITE` and `OPS_USER_ID` are unset. Aarav was told the `gh secret set` / `gh variable set` commands.
+- The cost target is still open decision 2 in CANDIDATES.md (proposed $0.01 per check, $3 per watch per month); no record has needed it yet.
+- Waiting on Aarav: replacement site(s) for the flight-price intent, or other candidates from the shortlist; then step 1 of the procedure again. Resume with `nah implement real-site-hardening` once a site is named; attest with `nah attest real-site-hardening site-onboarding onboarding-records --actor RubiksCubingGod --rationale <why> --artifact docs/onboarding/records/<host>.md --finish` when 2-3 records are complete and their watches configured.
