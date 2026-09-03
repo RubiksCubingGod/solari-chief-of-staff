@@ -102,6 +102,7 @@
 
 - Open with `nah harden calendar-wiring`. Inside the attempt, a bare `nah task finish calendar-wiring <task>` re-earns a done task's stale proofs, and `nah verify calendar-wiring <task> <proof> --retry` re-records a red gate. Run the three gates one at a time in a quiet window: no other vitest against 55432 while any gate runs, `coverage/.tmp` empty before starting, about 30 minutes each on a quiet box, `TEST_DATABASE_URL=postgres://postgres:nahtest@127.0.0.1:55432/postgres` set in the launching call. Agentic-mode's eval-gate is running from 05:25Z; message that session (`chief-of-staff-4b`) before the first gate.
 - The hardening result goes to `nah lifecycle assurance calendar-wiring` on stdin.
+- Triage #1 `auth-guard-suite-strict-mode-violation-on-getbyrole-alert-under-gate-load` (filed 05:43Z, not this sprint's file: `packages/web/src/auth-guard.integration.test.ts` from dashboard-read's magic-link-auth). Under gate load the test at line 178, "refuses a link that has already been followed", hits a Playwright strict-mode violation: `getByRole('alert')` resolves to the sign-in page's `<p role="alert">` and, once Next has hydrated, `#__next-route-announcer__` as well. It passed in this sprint's gates and failed twice in agentic-mode's (373cc3a). Fix: `getByRole('alert').filter({ hasText: /already been used/ })`, or exclude the announcer. Any gate here may show it until then.
 
 ### Automatic replan (recorded for the trace)
 
