@@ -19,12 +19,14 @@ export {
   liveTelegramSkipReason,
 } from './live-telegram.js';
 export { createNoticeGate, type NoticeGate } from './notice-gate.js';
+export { createTelegramNotifier, renderWatchEvent, type TelegramNotifierOptions } from './notifier.js';
 export {
   DEFAULT_SEND_RETRY_POLICY,
   NoBindingError,
   createSendToUser,
   type ChatSender,
   type SendAttempt,
+  type SendOptions,
   type SendRetryPolicy,
   type SendToUser,
   type SendToUserOptions,

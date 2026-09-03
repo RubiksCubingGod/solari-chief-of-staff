@@ -181,6 +181,10 @@ describe('the section 5 schema', () => {
     });
     expect(indexedColumns(deliveries)).toEqual({
       deliveries_user_id_created_at_idx: ['user_id', 'created_at'],
+      // One key is one delivery: the watch engine's notifier is at-least-once,
+      // and the unique index is what makes two sends of one key one row even
+      // when they land together.
+      deliveries_dedup_key_key: ['dedup_key'],
     });
     expect(indexedColumns(loginTokens)).toEqual({
       login_tokens_user_id_idx: ['user_id'],

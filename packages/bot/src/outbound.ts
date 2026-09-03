@@ -1,5 +1,5 @@
 import { deliveries, users, type Delivery } from '@chief-of-staff/db';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 
 import type { BotDatabase } from './transcript.js';
 
@@ -68,6 +68,18 @@ export interface SendToUserOptions {
   readonly wait?: (ms: number) => Promise<void>;
 }
 
+export interface SendOptions {
+  /**
+   * The identity of the message, for a caller that may say the same thing
+   * twice - the watch engine's notifier port is at-least-once. One key is one
+   * delivery: a second send under a key that was sent, or is being sent, gets
+   * that delivery back and touches nothing; a key whose delivery failed is
+   * tried again on the same row, so the record shows every attempt it took.
+   * An unkeyed send is its own delivery every time.
+   */
+  readonly dedupKey?: string;
+}
+
 /**
  * Delivers `text` to `userId`, or records why it could not.
  *
@@ -76,21 +88,22 @@ export interface SendToUserOptions {
  * bug in the caller, and s7 fanning reminders out to many users should not have
  * to wrap every one of them in a catch to keep going.
  */
-export type SendToUser = (userId: string, text: string) => Promise<Delivery>;
+export type SendToUser = (userId: string, text: string, options?: SendOptions) => Promise<Delivery>;
 
 export function createSendToUser(options: SendToUserOptions): SendToUser {
   const { db, sender } = options;
   const retry = options.retry ?? DEFAULT_SEND_RETRY_POLICY;
   const wait = options.wait ?? delay;
 
-  return async (userId: string, text: string): Promise<Delivery> => {
+  return async (userId: string, text: string, send: SendOptions = {}): Promise<Delivery> => {
     const chatId = await resolveChatId(db, userId);
     if (chatId === null) throw new NoBindingError(userId);
 
     // Written before the first attempt, so a process killed mid-send leaves a
     // row saying a message was owed rather than leaving nothing at all.
-    const [pending] = await db.insert(deliveries).values({ userId, chatId, text }).returning();
-    if (pending === undefined) throw new Error('the delivery was not recorded');
+    const reserved = await reserve(db, { userId, chatId, text }, send.dedupKey);
+    if (reserved.kind === 'delivered') return reserved.delivery;
+    const pending = reserved.delivery;
 
     let attempts = 0;
     let last: SendAttempt = NEVER_ATTEMPTED;
@@ -110,7 +123,7 @@ export function createSendToUser(options: SendToUserOptions): SendToUser {
         // Cleared on success even after a retry: a delivery that arrived has
         // nothing left to explain.
         error: last.ok ? null : last.reason,
-        attempts,
+        attempts: pending.attempts + attempts,
         settledAt: new Date(),
       })
       .where(eq(deliveries.id, pending.id))
@@ -118,6 +131,49 @@ export function createSendToUser(options: SendToUserOptions): SendToUser {
     if (settled === undefined) throw new Error('the delivery record vanished mid-send');
     return settled;
   };
+}
+
+type Reservation =
+  /** A row of ours to send on, with the attempts already on it. */
+  | { readonly kind: 'reserved'; readonly delivery: Delivery }
+  /** Somebody already sent, or is sending, this key: nothing to do. */
+  | { readonly kind: 'delivered'; readonly delivery: Delivery };
+
+/**
+ * The row a send is recorded on. Unkeyed, always a new one. Keyed, the row
+ * for that key: new when there was none, reused when the earlier send failed
+ * (set back to pending, so a process killed mid-retry leaves the same honest
+ * row), and handed back untouched when it was sent or is still pending. The
+ * unique index on the key is what makes two sends of one key one row even
+ * when they arrive together.
+ */
+async function reserve(
+  db: BotDatabase,
+  values: { readonly userId: string; readonly chatId: string; readonly text: string },
+  dedupKey: string | undefined,
+): Promise<Reservation> {
+  if (dedupKey === undefined) {
+    const [inserted] = await db.insert(deliveries).values(values).returning();
+    if (inserted === undefined) throw new Error('the delivery was not recorded');
+    return { kind: 'reserved', delivery: inserted };
+  }
+  const [inserted] = await db
+    .insert(deliveries)
+    .values({ ...values, dedupKey })
+    .onConflictDoNothing({ target: deliveries.dedupKey })
+    .returning();
+  if (inserted !== undefined) return { kind: 'reserved', delivery: inserted };
+  // Only a failed delivery is ours to retry, and only if nobody else has
+  // picked it up in the meantime: the conditional update is the claim.
+  const [retried] = await db
+    .update(deliveries)
+    .set({ status: 'pending', error: null, settledAt: null })
+    .where(and(eq(deliveries.dedupKey, dedupKey), eq(deliveries.status, 'failed')))
+    .returning();
+  if (retried !== undefined) return { kind: 'reserved', delivery: retried };
+  const [existing] = await db.select().from(deliveries).where(eq(deliveries.dedupKey, dedupKey)).limit(1);
+  if (existing === undefined) throw new Error(`the delivery under key ${dedupKey} vanished before it was read`);
+  return { kind: 'delivered', delivery: existing };
 }
 
 /**

@@ -22,6 +22,7 @@ function delivery(overrides: Partial<Delivery>): Delivery {
     error: null,
     createdAt: new Date('2026-09-09T09:00:00Z'),
     settledAt: new Date('2026-09-09T09:00:01Z'),
+    dedupKey: null,
     ...overrides,
   };
 }

@@ -360,8 +360,15 @@ export const deliveries = pgTable(
     // Null exactly while the delivery is still pending, which is what makes a
     // stuck row findable without joining anything.
     settledAt: timestampColumn('settled_at'),
+    // The identity of a message a caller may send more than once - a watch
+    // event, emitted at-least-once - so that one key is one delivery. Null
+    // for a message that is its own delivery every time, like a reminder.
+    dedupKey: text('dedup_key'),
   },
-  (table) => [index('deliveries_user_id_created_at_idx').on(table.userId, table.createdAt)],
+  (table) => [
+    index('deliveries_user_id_created_at_idx').on(table.userId, table.createdAt),
+    uniqueIndex('deliveries_dedup_key_key').on(table.dedupKey),
+  ],
 );
 
 /**

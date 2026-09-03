@@ -32,6 +32,7 @@ function settled(status: Delivery['status'], error: string | null = null): Deliv
     error,
     createdAt: new Date('2026-09-09T12:00:00Z'),
     settledAt: new Date('2026-09-09T12:00:01Z'),
+    dedupKey: null,
   };
 }
 

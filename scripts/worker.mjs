@@ -67,8 +67,13 @@ async function run() {
   // extractor writer, and the agentic mission behind the playbooks.
   const anthropic = anthropicClient(agent);
   const creator = extractorCreator(agent, anthropic);
-  // Every event is one JSON line on stdout until a delivery channel lands.
-  const notifier = watch.createLogNotifier();
+  // A watch tells the person over Telegram, through the same door the
+  // questions and reminders use, when the bot's token is set; every event is
+  // also one JSON line on stdout for a person with no chat bound, and for
+  // everyone when there is no door.
+  const sendToUser = telegramOutbound(bot, database);
+  const log = watch.createLogNotifier();
+  const notifier = sendToUser === undefined ? log : bot.createTelegramNotifier(sendToUser, { fallback: log });
   // Every playbook-mode task goes through the runner, on the same provider.
   // Two playbooks so far - the fakegym cancellation and the fakedmv booking
   // a slot watch arms - each at the origin where its fixture listens on this
@@ -99,7 +104,6 @@ async function run() {
   // person - applied the moment this worker settles the task, and swept up
   // once a minute by the watch engine for a task a channel settled.
   const snipe = { db: database, notifier };
-  const sendToUser = telegramOutbound(bot, database);
 
   let worker;
   try {
