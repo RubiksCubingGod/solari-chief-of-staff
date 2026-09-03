@@ -13,6 +13,9 @@ interface CreateCalendarItemBody {
   readonly renewOn?: string;
   readonly cancelBy?: string;
   readonly action?: Record<string, unknown>;
+  readonly reminderLeadDays?: number;
+  readonly autoCancel?: boolean;
+  readonly autoCancelLeadDays?: number;
 }
 
 const createCalendarItemBodySchema = {
@@ -26,7 +29,17 @@ const createCalendarItemBodySchema = {
     amountCents: { type: 'integer', minimum: 0 },
     renewOn: { type: 'string', format: 'iso-date' },
     cancelBy: { type: 'string', format: 'iso-date' },
+    // What to do when the date comes. A cancellation names its site here, as
+    // `{ "site": "fakegym" }`, and the worker matches that to a playbook.
     action: { type: 'object' },
+    // Days ahead of the date the reminder goes out, and ahead of the renewal
+    // the cancellation is armed; both default in the schema, and a year is
+    // the most either can mean.
+    reminderLeadDays: { type: 'integer', minimum: 0, maximum: 365 },
+    // A subscription the worker cancels ahead of its renewal, behind a yes
+    // over Telegram.
+    autoCancel: { type: 'boolean' },
+    autoCancelLeadDays: { type: 'integer', minimum: 0, maximum: 365 },
   },
   // The daily cron in ARCHITECTURE §3.3 scans for a date. An item that carries
   // none of the date its kind is scanned by would never be reminded about, so
@@ -39,6 +52,13 @@ const createCalendarItemBodySchema = {
     {
       if: { properties: { kind: { const: 'deadline' } }, required: ['kind'] },
       then: { required: ['cancelBy'] },
+    },
+    // Only a subscription renews, so only a subscription can be cancelled
+    // ahead of renewing. A deadline flagged for it is a mistake, refused here
+    // rather than stored as a flag the scan would never read.
+    {
+      if: { properties: { autoCancel: { const: true } }, required: ['autoCancel'] },
+      then: { properties: { kind: { const: 'subscription' } } },
     },
   ],
 } as const;
@@ -62,6 +82,13 @@ export function registerCalendarItemRoutes(app: FastifyInstance): void {
           renewOn: body.renewOn ?? null,
           cancelBy: body.cancelBy ?? null,
           action: body.action ?? null,
+          // Left to the schema's defaults when absent, so the row says what
+          // the scan will do rather than what the caller did not say.
+          ...(body.reminderLeadDays === undefined ? {} : { reminderLeadDays: body.reminderLeadDays }),
+          ...(body.autoCancel === undefined ? {} : { autoCancel: body.autoCancel }),
+          ...(body.autoCancelLeadDays === undefined
+            ? {}
+            : { autoCancelLeadDays: body.autoCancelLeadDays }),
         })
         .returning();
       return reply.status(201).send(created);

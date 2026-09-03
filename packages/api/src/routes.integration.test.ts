@@ -342,6 +342,64 @@ describe('calendar items', () => {
 
     await expect(app.db.select().from(calendarItems)).resolves.toEqual([]);
   });
+
+  it('takes the reminder lead and the auto-cancel settings, and defaults them when absent', async () => {
+    const flagged = await app.inject({
+      method: 'POST',
+      url: '/calendar-items',
+      headers: asOwner(),
+      payload: {
+        ...A_SUBSCRIPTION,
+        reminderLeadDays: 7,
+        autoCancel: true,
+        autoCancelLeadDays: 5,
+        action: { site: 'fakegym' },
+      },
+    });
+    expect(flagged.statusCode).toBe(201);
+    expect(flagged.json()).toMatchObject({
+      reminderLeadDays: 7,
+      autoCancel: true,
+      autoCancelLeadDays: 5,
+      action: { site: 'fakegym' },
+    });
+
+    const plain = await app.inject({
+      method: 'POST',
+      url: '/calendar-items',
+      headers: asOwner(),
+      payload: A_SUBSCRIPTION,
+    });
+    expect(plain.statusCode).toBe(201);
+    // The schema's defaults, which are what the scan reads: three days'
+    // notice, and nothing cancelled that the person did not flag.
+    expect(plain.json()).toMatchObject({
+      reminderLeadDays: 3,
+      autoCancel: false,
+      autoCancelLeadDays: 3,
+    });
+  });
+
+  it('refuses auto-cancel on a deadline, and a lead that is not a count of days', async () => {
+    for (const payload of [
+      { kind: 'deadline', name: 'Amend the return', cancelBy: '2026-10-15', autoCancel: true },
+      { ...A_SUBSCRIPTION, reminderLeadDays: -1 },
+      { ...A_SUBSCRIPTION, reminderLeadDays: 1.5 },
+      { ...A_SUBSCRIPTION, autoCancelLeadDays: 366 },
+      { ...A_SUBSCRIPTION, autoCancel: 'yes' },
+    ]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/calendar-items',
+        headers: asOwner(),
+        payload,
+      });
+      expect(response.statusCode, JSON.stringify(payload)).toBe(400);
+      expect(code(response.body)).toBe('validation_failed');
+    }
+
+    await expect(app.db.select().from(calendarItems)).resolves.toEqual([]);
+  });
 });
 
 describe('POST /tasks', () => {

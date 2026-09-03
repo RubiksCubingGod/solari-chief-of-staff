@@ -1,7 +1,14 @@
-import { taskEvents, tasks } from '@chief-of-staff/db';
+import { resolutionOf, type UserResolution, type UserResolutionOutcome } from '@chief-of-staff/core';
+import { createUserAnswerSink, taskEvents, tasks, type TaskLedger } from '@chief-of-staff/db';
 import { and, eq, inArray } from 'drizzle-orm';
 
-import { ANSWER_RECORDED, ASSISTANT_UNAVAILABLE, HOW_TO_BIND } from './replies.js';
+import {
+  ANSWER_RECORDED,
+  ASSISTANT_UNAVAILABLE,
+  DECLINE_RECORDED,
+  HOW_TO_BIND,
+  QUESTION_CLOSED,
+} from './replies.js';
 import { resolveUserId, type BotDatabase } from './transcript.js';
 
 /**
@@ -15,6 +22,12 @@ import { resolveUserId, type BotDatabase } from './transcript.js';
  * to a question about something else. And sending a message to neither loses
  * it in a way nobody can see: the user is left waiting on a reply that is
  * never coming, with a transcript that says their message arrived.
+ *
+ * An answer is handed to the task ledger, which is the one writer of a task's
+ * state: it records the reply beside the question, queues the task to run
+ * again with it, and refuses a reply the task can no longer take - a question
+ * that expired, a task that moved on - so the bot can say so rather than file
+ * the words somewhere nothing will read them.
  */
 
 /** What the chat loop is handed. The bot knows the user, so the loop need not. */
@@ -28,7 +41,7 @@ export interface ChatLoopRequest {
  * The chat loop, as the bot needs it: words in, words out.
  *
  * A port rather than an import of `@chief-of-staff/agent`, because what the
- * loop needs to do its job — an API base URL, a model client, a key — is not
+ * loop needs to do its job - an API base URL, a model client, a key - is not
  * the bot's to hold, and because the composition sprint task wires the real one
  * in without this package growing a dependency on it.
  */
@@ -39,24 +52,29 @@ export interface ChatLoop {
 /** A question a task has asked and is parked waiting on. */
 export interface PendingQuestion {
   readonly taskId: string;
+  readonly questionId: string;
   readonly question: string;
 }
 
-/** One answer, with the question it answers, as the sink receives it. */
+/** One reply, with the question it answers and what the ledger is to make of it. */
 export interface QuestionAnswer {
   readonly userId: string;
   readonly taskId: string;
+  readonly questionId: string;
   readonly question: string;
+  /** The person's words, untouched. */
   readonly text: string;
+  /** The words as the ledger takes them: an answer for the task to read, or a no that ends it. */
+  readonly resolution: UserResolution;
 }
 
 /**
- * Where an answer goes. In this sprint nothing reads what it writes — the task
- * engine that acts on a reply arrives later — so the sink is proven by the
- * record it leaves rather than by anything happening next.
+ * Where a reply goes: the ledger's sink in production, a recorder in tests.
+ * It answers whether the task took the reply, because a reply the task could
+ * not take deserves a different sentence from one it did.
  */
 export interface AnswerSink {
-  deliver(answer: QuestionAnswer): Promise<void>;
+  deliver(answer: QuestionAnswer): Promise<UserResolutionOutcome>;
 }
 
 /** The event types that decide whether a task is waiting on an answer. */
@@ -99,7 +117,7 @@ export async function findPendingQuestion(
 
   const asked = new Map<string, number>();
   const answered = new Map<string, number>();
-  const newest = new Map<string, { question: string; ts: Date }>();
+  const newest = new Map<string, AskedQuestion & { ts: Date }>();
   for (const row of rows) {
     if (row.type === 'user_reply') {
       answered.set(row.taskId, (answered.get(row.taskId) ?? 0) + 1);
@@ -113,7 +131,7 @@ export async function findPendingQuestion(
     if (question === null) continue;
     asked.set(row.taskId, (asked.get(row.taskId) ?? 0) + 1);
     const seen = newest.get(row.taskId);
-    if (seen === undefined || row.ts > seen.ts) newest.set(row.taskId, { question, ts: row.ts });
+    if (seen === undefined || row.ts > seen.ts) newest.set(row.taskId, { ...question, ts: row.ts });
   }
 
   let pending: (PendingQuestion & { ts: Date }) | null = null;
@@ -122,27 +140,26 @@ export async function findPendingQuestion(
     // Two jobs waiting at once is a race nothing here can settle from the
     // words alone; the most recent question is the one the user is most
     // likely answering, and it is the one they can still see.
-    if (pending === null || question.ts > pending.ts) {
-      pending = { taskId, question: question.question, ts: question.ts };
-    }
+    if (pending === null || question.ts > pending.ts) pending = { taskId, ...question };
   }
-  return pending === null ? null : { taskId: pending.taskId, question: pending.question };
+  if (pending === null) return null;
+  return { taskId: pending.taskId, questionId: pending.questionId, question: pending.question };
 }
 
 /**
- * The sink the runtime uses when nothing else is supplied: the answer is
- * written onto the task's own timeline, beside the question it answers, which
- * is where the engine that asked will look for it.
+ * The sink the runtime uses when nothing else is supplied: the task ledger's
+ * own, which is the one writer of a task's state. It records the reply and
+ * queues the task to run again with it, or cancels the task on a no; and it
+ * refuses, rather than records, a reply to a question the task can no longer
+ * take.
  */
-export function createTaskEventAnswerSink(db: BotDatabase): AnswerSink {
+export function createLedgerAnswerSink(
+  ledger: TaskLedger,
+  now: () => Date = () => new Date(),
+): AnswerSink {
+  const sink = createUserAnswerSink(ledger, now);
   return {
-    async deliver(answer: QuestionAnswer): Promise<void> {
-      await db.insert(taskEvents).values({
-        taskId: answer.taskId,
-        type: 'user_reply',
-        payload: { text: answer.text },
-      });
-    },
+    deliver: (answer) => sink.resolve(answer.taskId, answer.questionId, answer.resolution),
   };
 }
 
@@ -182,13 +199,19 @@ export async function routeMessage(
   try {
     const pending = await findPendingQuestion(db, userId);
     if (pending !== null) {
-      await options.answerSink.deliver({
+      // A plain no ends the task without running anything; everything else
+      // is the task's to read, in the person's own words.
+      const resolution = resolutionOf(message.text);
+      const outcome = await options.answerSink.deliver({
         userId,
         taskId: pending.taskId,
+        questionId: pending.questionId,
         question: pending.question,
         text: message.text,
+        resolution,
       });
-      return ANSWER_RECORDED;
+      if (!outcome.accepted) return QUESTION_CLOSED;
+      return resolution.kind === 'decline' ? DECLINE_RECORDED : ANSWER_RECORDED;
     }
     const spoken = await options.chatLoop.respond({
       userId,
@@ -207,9 +230,19 @@ export async function routeMessage(
   }
 }
 
-/** The question text an `ask_user` payload carries, if it carries one at all. */
-function questionOf(payload: unknown): string | null {
+interface AskedQuestion {
+  readonly questionId: string;
+  readonly question: string;
+}
+
+/**
+ * The question an `ask_user` payload carries, if it carries one at all: the
+ * words, and the id the ledger files the reply under.
+ */
+function questionOf(payload: unknown): AskedQuestion | null {
   if (typeof payload !== 'object' || payload === null) return null;
-  const question = (payload as { question?: unknown }).question;
-  return typeof question === 'string' && question !== '' ? question : null;
+  const { questionId, question } = payload as { questionId?: unknown; question?: unknown };
+  if (typeof questionId !== 'string' || questionId === '') return null;
+  if (typeof question !== 'string' || question === '') return null;
+  return { questionId, question };
 }

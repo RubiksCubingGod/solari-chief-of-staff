@@ -54,7 +54,7 @@ passes here it passes there.
 | `pnpm migrate` | Applies the migration set to `DATABASE_URL`. |
 | `pnpm browsers` | Downloads the pinned Chromium the browser provider drives. |
 | `pnpm start` | Runs the API server on `HOST` and `PORT`. |
-| `pnpm worker` | Runs the job worker: checks watches on their schedules, reconciles the schedule set once a minute, runs queued tasks through their playbooks in a guarded browser, and scans the calendar every hour for reminders to send over Telegram. |
+| `pnpm worker` | Runs the job worker: checks watches on their schedules, reconciles the schedule set once a minute, runs queued tasks through their playbooks in a guarded browser, and scans the calendar every hour for reminders to send over Telegram and for flagged subscriptions to cancel ahead of their renewal, behind a yes over Telegram. |
 | `pnpm clean` | Removes build output. |
 
 `pnpm start` and `pnpm worker` are the two long-running processes: one
@@ -76,6 +76,20 @@ runs twice or dies halfway never sends twice; a send that fails is retried by
 the next scan, three times at most, and every outcome is on the entry.
 Without the token the worker says so at startup and runs everything else.
 
+A subscription flagged `autoCancel` gets more than a reminder. On its lead
+day the scan enqueues one cancellation task for the site its `action` names
+(`{ "site": "fakegym" }`, matched to a playbook the worker registered), and
+the task's first act is to ask, over Telegram, before it opens a browser:
+`Cancel Gym before it renews on 2026-09-12? Amount: 45.00. Reply yes to go
+ahead, or no to leave it as it is.` A plain yes runs the playbook, a plain
+no ends the task without running any of it, and anything else is asked
+again. When the task ends, the entry is marked with what became of it -
+handled, declined, or what went wrong - and a flagged entry with no playbook
+or no connected site is marked `needs_attention` with the reason instead of
+becoming a task. Each renewal is armed once, however many scans see it. The
+bot carries replies back: a message from someone a task is waiting on is
+handed to that task rather than to the assistant.
+
 To change the schema, edit `packages/db/src/schema.ts`, then run
 `pnpm --filter @chief-of-staff/db generate` to write a new migration, and
 `pnpm migrate` to apply it. Generated migrations are committed.
@@ -91,7 +105,7 @@ To change the schema, edit `packages/db/src/schema.ts`, then run
 | `packages/agent` | The Claude layer — arrives in a later sprint. |
 | `packages/watch` | The watch engine: the fetch tier ladder, the Drizzle watch store, and the scheduled check that runs each watch. |
 | `packages/playbooks` | Scripted site flows — arrives in a later sprint. |
-| `packages/bot` | The Telegram bot: the one runtime every Telegram message crosses, and the transcript it writes. |
+| `packages/bot` | The Telegram bot: the one runtime every Telegram message crosses, the transcript it writes, and the replies it carries back to waiting tasks. |
 | `packages/web` | The Next.js dashboard: the shell its pages land in, and the HTTP client it reads them through. Lint refuses a database import here — the API is the only door. |
 | `fixtures` | Local fixture sites the engines are tested against. |
 

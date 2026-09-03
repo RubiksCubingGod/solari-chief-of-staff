@@ -67,3 +67,20 @@ export const ASSISTANT_UNAVAILABLE =
  */
 export const TEXT_ONLY =
   'I can only read text, so I have not acted on that. Tell me in words what you would like, and I will.';
+
+/**
+ * What somebody who has just said no to a question is told. It says the job
+ * has stopped, because that is what a no does: the ledger cancels the task
+ * without running any of it, and the person should know nothing is pending.
+ */
+export const DECLINE_RECORDED =
+  'Understood - I have told the job no, and it has stopped without doing anything.';
+
+/**
+ * What somebody whose reply arrived too late is told: the question ran out
+ * of time, or the job moved on before the answer reached it. It says the
+ * reply was not passed along, because a person who thinks they have said
+ * yes to something that will never run is worse off than one who knows.
+ */
+export const QUESTION_CLOSED =
+  'That question is no longer open - the job that asked has moved on, so I have not passed your reply along. If you still want something done, just tell me.';

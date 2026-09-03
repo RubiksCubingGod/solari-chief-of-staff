@@ -177,7 +177,29 @@ export function createChatToolkit(options: ChatToolkitOptions): ChatToolkit {
         action: z
           .record(z.string(), z.unknown())
           .optional()
-          .describe('what to do about it when the date comes'),
+          .describe(
+            'what to do about it when the date comes; a cancellation names its site as ' +
+              '{ "site": "fakegym" }',
+          ),
+        reminderLeadDays: z
+          .int()
+          .min(0)
+          .max(365)
+          .optional()
+          .describe('days before the date the reminder goes out; 3 when absent'),
+        autoCancel: z
+          .boolean()
+          .optional()
+          .describe(
+            'cancel the subscription ahead of its renewal, after asking the user yes or no ' +
+              'over chat first; subscriptions only, and needs action.site',
+          ),
+        autoCancelLeadDays: z
+          .int()
+          .min(0)
+          .max(365)
+          .optional()
+          .describe('days before the renewal the cancellation is armed; 3 when absent'),
       }),
       run: (input) => call('add_calendar_item', input, 'POST', '/calendar-items', input),
     }),

@@ -31,6 +31,12 @@ import { startTestPostgres, type TestPostgres } from './testing/postgres.js';
  * port answers whatever the test says it does.
  */
 
+/**
+ * The auto-cancel arm's counters when the arm is not composed, which it is
+ * not here: this file is the reminder scan's proof, and the arm has its own.
+ */
+const NO_ARM = { enqueued: 0, unlinked: 0, settled: 0 } as const;
+
 let postgres: TestPostgres;
 let database: Database;
 const started: JobHarness[] = [];
@@ -145,7 +151,7 @@ describe('runCalendarScan', () => {
     expect(port.calls).toEqual([
       { userId, text: 'Reminder: Gym renews on 2026-09-12 (in 3 days). Amount: 45.00.' },
     ]);
-    expect(report).toEqual({ due: 1, delivered: 1, late: 0, failed: 0, skipped: 0 });
+    expect(report).toEqual({ due: 1, delivered: 1, late: 0, failed: 0, skipped: 0, ...NO_ARM });
     const rows = await remindersOf(itemId);
     expect(rows).toMatchObject([
       { dueOn: '2026-09-09', state: 'delivered', attempts: 1, error: null },
@@ -189,7 +195,7 @@ describe('runCalendarScan', () => {
     });
 
     expect(port.calls).toEqual([]);
-    expect(report).toEqual({ due: 0, delivered: 0, late: 0, failed: 0, skipped: 0 });
+    expect(report).toEqual({ due: 0, delivered: 0, late: 0, failed: 0, skipped: 0, ...NO_ARM });
     for (const itemId of [early, done, handled]) expect(await remindersOf(itemId)).toEqual([]);
   });
 
@@ -205,7 +211,7 @@ describe('runCalendarScan', () => {
 
     expect(port.calls).toHaveLength(1);
     // Still owed today, already delivered: counted, not sent.
-    expect(again).toEqual({ due: 1, delivered: 0, late: 0, failed: 0, skipped: 0 });
+    expect(again).toEqual({ due: 1, delivered: 0, late: 0, failed: 0, skipped: 0, ...NO_ARM });
     expect(await remindersOf(itemId)).toHaveLength(1);
   });
 
@@ -258,11 +264,11 @@ describe('runCalendarScan', () => {
     const first = await scan();
     const second = await scan();
 
-    expect(first).toEqual({ due: 1, delivered: 0, late: 0, failed: 0, skipped: 1 });
+    expect(first).toEqual({ due: 1, delivered: 0, late: 0, failed: 0, skipped: 1, ...NO_ARM });
     // Nothing was attempted, so there is nothing to retry: the skip is the
     // record, visible on the entry, and a person who binds a chat tomorrow
     // gets tomorrow's reminders.
-    expect(second).toEqual({ due: 1, delivered: 0, late: 0, failed: 0, skipped: 0 });
+    expect(second).toEqual({ due: 1, delivered: 0, late: 0, failed: 0, skipped: 0, ...NO_ARM });
     expect(port.calls).toHaveLength(1);
     expect(await remindersOf(itemId)).toMatchObject([
       { state: 'skipped_unbound', attempts: 1, error: null },
@@ -283,7 +289,7 @@ describe('runCalendarScan', () => {
 
     expect(REMINDER_SEND_ATTEMPTS).toBe(3);
     const first = await scan();
-    expect(first).toEqual({ due: 1, delivered: 0, late: 0, failed: 1, skipped: 0 });
+    expect(first).toEqual({ due: 1, delivered: 0, late: 0, failed: 1, skipped: 0, ...NO_ARM });
     expect(await remindersOf(itemId)).toMatchObject([
       { state: 'failed', attempts: 1, error: 'Telegram: 502 Bad Gateway' },
     ]);
@@ -298,7 +304,7 @@ describe('runCalendarScan', () => {
     const fourth = await scan();
 
     expect(port.calls).toHaveLength(3);
-    expect(fourth).toEqual({ due: 1, delivered: 0, late: 0, failed: 0, skipped: 0 });
+    expect(fourth).toEqual({ due: 1, delivered: 0, late: 0, failed: 0, skipped: 0, ...NO_ARM });
     expect(await remindersOf(itemId)).toMatchObject([{ state: 'failed', attempts: 3 }]);
   });
 
@@ -333,7 +339,7 @@ describe('runCalendarScan', () => {
     expect(port.calls).toEqual([
       { userId, text: 'Late reminder: Gym renews on 2026-09-12 (tomorrow). Amount: 45.00.' },
     ]);
-    expect(report).toEqual({ due: 1, delivered: 0, late: 1, failed: 0, skipped: 0 });
+    expect(report).toEqual({ due: 1, delivered: 0, late: 1, failed: 0, skipped: 0, ...NO_ARM });
     // Keyed by the day it was first owed, so the late send is the same
     // reminder and not a second one.
     expect(await remindersOf(itemId)).toMatchObject([{ dueOn: '2026-09-09', state: 'late' }]);

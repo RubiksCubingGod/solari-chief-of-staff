@@ -28,6 +28,8 @@ export { createReminderSender } from './reminders.js';
 export {
   ANSWER_RECORDED,
   ASSISTANT_UNAVAILABLE,
+  DECLINE_RECORDED,
+  QUESTION_CLOSED,
   BINDING_ALREADY_DONE,
   BINDING_CHAT_TAKEN,
   BINDING_CODE_CONSUMED,
@@ -40,7 +42,7 @@ export {
   TEXT_ONLY,
 } from './replies.js';
 export {
-  createTaskEventAnswerSink,
+  createLedgerAnswerSink,
   findPendingQuestion,
   routeMessage,
   type AnswerSink,
@@ -66,3 +68,4 @@ export {
   type BotDatabase,
   type TranscriptEntry,
 } from './transcript.js';
+export { createTelegramUserIO } from './user-io.js';

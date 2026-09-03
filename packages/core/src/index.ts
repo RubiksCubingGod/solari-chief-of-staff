@@ -113,6 +113,7 @@ export {
 } from './binding-code.js';
 
 export * from './calendar/index.js';
+export * from './consent.js';
 export * from './task-lifecycle.js';
 export * from './user-io.js';
 export * from './watch/index.js';

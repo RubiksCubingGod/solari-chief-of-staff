@@ -10,7 +10,8 @@ import {
 /**
  * The states a recorded dispatch can be in. A reminder row is written before
  * the send (`pending`) and settled after it; an auto-cancel row is written when
- * the arm decides, and says whether a task came of it.
+ * the arm decides, says whether a task came of it, and is settled by how that
+ * task ended.
  */
 
 describe('the dispatch vocabularies', () => {
@@ -18,14 +19,21 @@ describe('the dispatch vocabularies', () => {
     expect(CALENDAR_REMINDER_STATES).toEqual(['pending', 'delivered', 'late', 'failed', 'skipped_unbound']);
   });
 
-  it('record an auto-cancel as a task enqueued or an entry nobody can act on', () => {
-    expect(CALENDAR_AUTO_CANCEL_STATES).toEqual(['enqueued', 'unlinked']);
+  it('record an auto-cancel as a task enqueued or an entry nobody can act on, then how it ended', () => {
+    expect(CALENDAR_AUTO_CANCEL_STATES).toEqual([
+      'enqueued',
+      'unlinked',
+      'handled',
+      'declined',
+      'failed',
+    ]);
   });
 
   it('guard their members', () => {
     expect(isCalendarReminderState('late')).toBe(true);
     expect(isCalendarReminderState('sent')).toBe(false);
     expect(isCalendarAutoCancelState('unlinked')).toBe(true);
+    expect(isCalendarAutoCancelState('handled')).toBe(true);
     expect(isCalendarAutoCancelState('pending')).toBe(false);
   });
 });

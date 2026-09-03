@@ -12,24 +12,28 @@ import {
   calendarAutoCancels,
   calendarItems,
   calendarReminders,
+  tasks,
   type CalendarAutoCancel,
   type CalendarItem,
   type CalendarReminder,
+  type Task,
 } from './schema.js';
 import type { TaskDatabase } from './task-ledger.js';
 
 /**
- * The persisted half of calendar semantics (reminder-path spec).
+ * The persisted half of calendar semantics (reminder-path and auto-cancel-path
+ * specs).
  *
- * Three writes, each of which is safe to repeat. A mark on an entry lands only
- * if it outranks what is there, decided in the `UPDATE`'s own `WHERE` so two
- * scans cannot interleave a weaker mark over a stronger one. A reminder or an
+ * Every write here is safe to repeat. A mark on an entry lands only if it
+ * outranks what is there, decided in the `UPDATE`'s own `WHERE` so two scans
+ * cannot interleave a weaker mark over a stronger one. A reminder or an
  * auto-cancel is recorded with `ON CONFLICT DO NOTHING` against the unique key
  * the migration declares, so the second writer gets the first writer's row
  * back and knows it was second. That is the whole of "record before dispatch":
- * whoever holds the freshly inserted row is the one who sends - and, because
- * a crashed scan leaves its row behind for the next one, whoever wins the
- * claim on a row that is still pending.
+ * whoever holds the freshly inserted row is the one who sends, or whose
+ * transaction the cancellation task was created in - and, because a crashed
+ * scan leaves its row behind for the next one, whoever wins the claim on a
+ * row that is still pending, or the settlement of one whose task has ended.
  */
 
 export type CalendarDatabase = TaskDatabase;
@@ -168,6 +172,19 @@ export interface AutoCancelDecision {
   readonly taskId?: string;
 }
 
+/** The row for one renewal, if the arm has decided it. */
+export async function findAutoCancel(
+  db: CalendarDatabase,
+  itemId: string,
+  renewOn: IsoDate,
+): Promise<CalendarAutoCancel | undefined> {
+  const [existing] = await db
+    .select()
+    .from(calendarAutoCancels)
+    .where(and(eq(calendarAutoCancels.itemId, itemId), eq(calendarAutoCancels.renewOn, renewOn)));
+  return existing;
+}
+
 /** Records the auto-cancel decision for `renewOn`. One row per (entry, renewal); a repeat gets the first row. */
 export async function recordAutoCancel(
   db: CalendarDatabase,
@@ -181,12 +198,88 @@ export async function recordAutoCancel(
     .onConflictDoNothing({ target: [calendarAutoCancels.itemId, calendarAutoCancels.renewOn] })
     .returning();
   if (inserted !== undefined) return { recorded: true, autoCancel: inserted };
-  const [existing] = await db
-    .select()
-    .from(calendarAutoCancels)
-    .where(and(eq(calendarAutoCancels.itemId, itemId), eq(calendarAutoCancels.renewOn, renewOn)));
+  const existing = await findAutoCancel(db, itemId, renewOn);
   if (existing === undefined) {
     throw new Error(`auto-cancel ${itemId} for ${renewOn} was neither inserted nor found`);
   }
   return { recorded: false, autoCancel: existing };
+}
+
+/** The cancellation task the arm creates for a renewal: whose it is, and what its playbook needs. */
+export interface AutoCancelTask {
+  readonly userId: string;
+  readonly input: Readonly<Record<string, unknown>>;
+}
+
+export type AutoCancelArm =
+  | { readonly recorded: true; readonly autoCancel: CalendarAutoCancel; readonly task: Task }
+  | { readonly recorded: false; readonly autoCancel: CalendarAutoCancel };
+
+/**
+ * Records that a cancellation task was enqueued for `renewOn` and creates
+ * the task, in one transaction: the row is the idempotence key, so the task
+ * exists exactly when the row says it does. A second caller for the same
+ * renewal - a scan that overlapped this one, or the next hour's - gets the
+ * first caller's row and creates nothing. The run job is the caller's to
+ * send once this has committed: a job for a task that rolled back would be
+ * a job for nothing, and a task whose job was never sent is what the
+ * reconcile sweep exists for.
+ */
+export function armAutoCancel(
+  db: CalendarDatabase,
+  itemId: string,
+  renewOn: IsoDate,
+  task: AutoCancelTask,
+): Promise<AutoCancelArm> {
+  return db.transaction(async (tx): Promise<AutoCancelArm> => {
+    const [inserted] = await tx
+      .insert(calendarAutoCancels)
+      .values({ itemId, renewOn, state: 'enqueued' })
+      .onConflictDoNothing({ target: [calendarAutoCancels.itemId, calendarAutoCancels.renewOn] })
+      .returning();
+    if (inserted === undefined) {
+      const existing = await findAutoCancel(tx, itemId, renewOn);
+      if (existing === undefined) {
+        throw new Error(`auto-cancel ${itemId} for ${renewOn} was neither inserted nor found`);
+      }
+      return { recorded: false, autoCancel: existing };
+    }
+    const [created] = await tx
+      .insert(tasks)
+      .values({ userId: task.userId, kind: 'cancel', mode: 'playbook', input: task.input })
+      .returning();
+    if (created === undefined) throw new Error(`the cancel task for ${itemId} was not created`);
+    const [linked] = await tx
+      .update(calendarAutoCancels)
+      .set({ taskId: created.id })
+      .where(eq(calendarAutoCancels.id, inserted.id))
+      .returning();
+    if (linked === undefined) throw new Error(`auto-cancel ${inserted.id} vanished before it was linked`);
+    return { recorded: true, autoCancel: linked, task: created };
+  });
+}
+
+export interface AutoCancelSettlement {
+  /** How the task ended, in the row's words. */
+  readonly state: Extract<CalendarAutoCancelState, 'handled' | 'declined' | 'failed'>;
+  readonly now?: Date;
+}
+
+/**
+ * Writes how an enqueued cancellation ended onto its row, if nobody has yet.
+ * Guarded on the row still being `enqueued`, so of two scans that both read
+ * the task as finished exactly one gets the row back - and that one writes
+ * the mark on the entry.
+ */
+export async function settleAutoCancel(
+  db: CalendarDatabase,
+  autoCancelId: string,
+  settlement: AutoCancelSettlement,
+): Promise<CalendarAutoCancel | undefined> {
+  const [settled] = await db
+    .update(calendarAutoCancels)
+    .set({ state: settlement.state, settledAt: settlement.now ?? new Date() })
+    .where(and(eq(calendarAutoCancels.id, autoCancelId), eq(calendarAutoCancels.state, 'enqueued')))
+    .returning();
+  return settled;
 }

@@ -1,13 +1,19 @@
 export {
   annotateCalendarItem,
+  armAutoCancel,
   claimReminder,
+  findAutoCancel,
   recordAutoCancel,
   recordReminder,
+  settleAutoCancel,
   settleReminder,
   type AnnotateOptions,
   type AnnotateOutcome,
+  type AutoCancelArm,
   type AutoCancelDecision,
   type AutoCancelRecord,
+  type AutoCancelSettlement,
+  type AutoCancelTask,
   type CalendarDatabase,
   type ReminderRecord,
   type ReminderSettlement,
@@ -21,10 +27,13 @@ export {
   runCalendarScan,
   type CalendarScanOptions,
   type CalendarScanReport,
+  type CancellationPlan,
+  type CancellationPlanner,
   type ReminderSendOutcome,
   type ReminderSender,
 } from './calendar-scan.js';
 export { createDatabase, logPoolError, type Database } from './client.js';
+export { withConfirmation } from './confirm.js';
 export {
   DEFAULT_RETRY_POLICY,
   createJobHarness,

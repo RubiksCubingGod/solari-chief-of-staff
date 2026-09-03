@@ -14,3 +14,4 @@ export * from './guardrails/index.js';
 export * from './runner/index.js';
 export * from './fakegym/cancellation.js';
 export * from './fakedmv/booking.js';
+export * from './auto-cancel.js';

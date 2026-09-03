@@ -407,6 +407,9 @@ export const calendarAutoCancels = pgTable(
     state: calendarAutoCancelState('state').notNull(),
     taskId: uuid('task_id').references(() => tasks.id, { onDelete: 'set null' }),
     createdAt: timestampColumn('created_at').notNull().defaultNow(),
+    // When the task's ending was written onto this row and the entry. Null
+    // while the task runs, and forever on a row that never had one.
+    settledAt: timestampColumn('settled_at'),
   },
   (table) => [
     uniqueIndex('calendar_auto_cancels_item_id_renew_on_key').on(table.itemId, table.renewOn),

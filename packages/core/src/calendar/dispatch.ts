@@ -19,11 +19,24 @@ export const CALENDAR_REMINDER_STATES = [
 export type CalendarReminderState = (typeof CALENDAR_REMINDER_STATES)[number];
 
 /**
- * What the auto-cancel arm decided for one renewal: a cancellation task was
- * enqueued, or the entry is `unlinked` - no connected site or no playbook for
- * it - and the entry was marked `needs_attention` instead.
+ * What the auto-cancel arm decided for one renewal, and then how it ended.
+ *
+ * The arm writes `enqueued` when a cancellation task came of the renewal, or
+ * `unlinked` when nothing can act on the entry - no site named, no playbook
+ * for it, no connected site - and the entry is marked `needs_attention`
+ * instead. An enqueued row is settled by a later scan once its task has
+ * ended: `handled` when the cancellation went through, `declined` when the
+ * person said no to it, `failed` when it ended any other way - unanswered,
+ * refused by the site, broken. The row is the renewal's whole story, so the
+ * dashboard can show it and the arm never asks twice about one renewal.
  */
-export const CALENDAR_AUTO_CANCEL_STATES = ['enqueued', 'unlinked'] as const;
+export const CALENDAR_AUTO_CANCEL_STATES = [
+  'enqueued',
+  'unlinked',
+  'handled',
+  'declined',
+  'failed',
+] as const;
 export type CalendarAutoCancelState = (typeof CALENDAR_AUTO_CANCEL_STATES)[number];
 
 export const isCalendarReminderState = memberGuard(CALENDAR_REMINDER_STATES);

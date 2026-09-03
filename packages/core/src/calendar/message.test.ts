@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { reminderMessage } from './message.js';
+import { cancellationQuestion, reminderMessage } from './message.js';
 
 /**
  * The words a reminder arrives as. One sentence, with everything a person needs
@@ -61,5 +61,25 @@ describe('reminderMessage', () => {
     // Zero is an amount; only a missing one is left out.
     expect(reminderMessage({ ...gym, ...on, amountCents: 0 })).toContain('Amount: 0.00.');
     expect(reminderMessage({ ...gym, ...on, amountCents: undefined })).not.toContain('Amount');
+  });
+});
+
+describe('cancellationQuestion', () => {
+  it('names the entry, the renewal it is meant to beat, the stake, and the two replies it reads', () => {
+    expect(cancellationQuestion({ name: 'Gym', renewOn: '2026-09-12', amountCents: 4500 })).toBe(
+      'Cancel Gym before it renews on 2026-09-12? Amount: 45.00. Reply yes to go ahead, or no to leave it as it is.',
+    );
+  });
+
+  it('leaves out an amount it does not have, and keeps a zero', () => {
+    expect(cancellationQuestion({ name: 'Newsletter', renewOn: '2026-09-12' })).toBe(
+      'Cancel Newsletter before it renews on 2026-09-12? Reply yes to go ahead, or no to leave it as it is.',
+    );
+    expect(
+      cancellationQuestion({ name: 'Newsletter', renewOn: '2026-09-12', amountCents: null }),
+    ).not.toContain('Amount');
+    expect(cancellationQuestion({ name: 'Trial', renewOn: '2026-09-12', amountCents: 0 })).toContain(
+      'Amount: 0.00.',
+    );
   });
 });

@@ -18,7 +18,7 @@ import {
   type ChatSender,
   type SendRetryPolicy,
 } from './outbound.js';
-import type { ChatLoop } from './routing.js';
+import type { AnswerSink, ChatLoop } from './routing.js';
 import { createBotRuntime, type BotRuntime } from './runtime.js';
 import {
   TEST_BOT_INFO,
@@ -74,6 +74,11 @@ function configFor(): BotConfig {
   });
 }
 
+/** Nothing in this file answers a question, so the runtime's ledger sink is not composed. */
+const noAnswers: AnswerSink = {
+  deliver: () => Promise.reject(new Error('no message in this file answers a question')),
+};
+
 function runtimeFor(transport: TestTransport, waits: number[] = []): BotRuntime {
   const runtime = createBotRuntime({
     config: configFor(),
@@ -84,6 +89,7 @@ function runtimeFor(transport: TestTransport, waits: number[] = []): BotRuntime 
     // door. The loop is present because the runtime requires one, and it is
     // never called.
     chatLoop: unreachableLoop,
+    answerSink: noAnswers,
     sendRetry: RETRY,
     wait: async (ms) => {
       waits.push(ms);

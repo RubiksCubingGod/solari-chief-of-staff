@@ -5,7 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 
 import { loadBotConfig, type BotConfig } from './config.js';
 import { HOW_TO_BIND, RATE_LIMIT_NOTICE, TEXT_ONLY } from './replies.js';
-import type { ChatLoop } from './routing.js';
+import type { AnswerSink, ChatLoop } from './routing.js';
 import { createBotRuntime, type BotRuntime } from './runtime.js';
 import {
   TEST_BOT_INFO,
@@ -59,6 +59,11 @@ function configFor(extra: NodeJS.ProcessEnv = {}): BotConfig {
 }
 
 /** A runtime wired to the test transport, stopped for the test automatically. */
+/** Nothing in this file answers a question, so the runtime's ledger sink is not composed. */
+const noAnswers: AnswerSink = {
+  deliver: () => Promise.reject(new Error('no message in this file answers a question')),
+};
+
 function runtimeFor(
   config: BotConfig,
   transport: TestTransport,
@@ -70,6 +75,7 @@ function runtimeFor(
     transformer: transport.transformer,
     botInfo: TEST_BOT_INFO,
     chatLoop,
+    answerSink: noAnswers,
     now,
   });
   started.push(runtime);
@@ -137,6 +143,7 @@ describe('transport configuration', () => {
       transformer: transport.transformer,
       botInfo: TEST_BOT_INFO,
       chatLoop,
+      answerSink: noAnswers,
       onPollingFailure: (error) => failures.push(error),
     });
     started.push(runtime);
@@ -258,6 +265,7 @@ describe('a failure partway through an update', () => {
       transformer: transport.transformer,
       botInfo: TEST_BOT_INFO,
       chatLoop,
+      answerSink: noAnswers,
       onUpdateFailure: (error) => failures.push(error),
     });
     started.push(runtime);

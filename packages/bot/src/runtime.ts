@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
+import type { JobHarness } from '@chief-of-staff/db';
 import {
   Bot,
   GrammyError,
@@ -34,7 +35,7 @@ import {
   TEXT_ONLY,
 } from './replies.js';
 import {
-  createTaskEventAnswerSink,
+  createLedgerAnswerSink,
   routeMessage,
   type AnswerSink,
   type ChatLoop,
@@ -73,11 +74,17 @@ export interface BotRuntimeOptions {
    */
   readonly chatLoop: ChatLoop;
   /**
-   * Where an answer to a pending question goes. Defaults to writing the reply
-   * onto the task's own timeline, which is what production wants; tests pass
-   * their own to watch what arrives.
+   * Where an answer to a pending question goes. Defaults to the task ledger
+   * over `db` and `harness`, which is what production wants; tests pass their
+   * own to watch what arrives.
    */
   readonly answerSink?: AnswerSink;
+  /**
+   * The harness an answered task is queued to run on. Required unless an
+   * `answerSink` is supplied: a reply the runtime recorded but could not
+   * queue the task for would park the job forever with its answer beside it.
+   */
+  readonly harness?: JobHarness;
   /** Injected so the rate limiter's refill is provable without waiting for it. */
   readonly now?: () => number;
   /**
@@ -103,6 +110,22 @@ export interface BotRuntimeOptions {
    * look into, the poll dying is a bot to restart.
    */
   readonly onUpdateFailure?: (error: unknown) => void;
+}
+
+/**
+ * The production sink: the ledger's, over the runtime's database and the
+ * harness it was given. A runtime with neither a harness nor a sink of its
+ * own is refused at construction rather than at the first answer, because
+ * the first answer is a person's, and "recorded but never acted on" is the
+ * failure this bot exists to prevent.
+ */
+function ledgerAnswerSink(options: BotRuntimeOptions, now: () => number): AnswerSink {
+  if (options.harness === undefined) {
+    throw new Error(
+      'the bot runtime needs a job harness to queue answered tasks on, or an answer sink of its own',
+    );
+  }
+  return createLedgerAnswerSink({ db: options.db, harness: options.harness }, () => new Date(now()));
 }
 
 /**
@@ -189,7 +212,7 @@ export function createBotRuntime(options: BotRuntimeOptions): BotRuntime {
   bot.use(
     route(db, {
       chatLoop: options.chatLoop,
-      answerSink: options.answerSink ?? createTaskEventAnswerSink(db),
+      answerSink: options.answerSink ?? ledgerAnswerSink(options, now),
     }),
   );
 

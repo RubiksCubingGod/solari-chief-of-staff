@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import {
   LLM_UNAVAILABLE,
   TOOL_BUDGET_SPENT,
@@ -19,12 +21,14 @@ import {
 import {
   bindingCodes,
   calendarItems,
+  createJobHarness,
   messages,
   runMigrations,
   taskEvents,
   tasks,
   users,
   watches,
+  type JobHarness,
 } from '@chief-of-staff/db';
 import { startTestPostgres, type TestPostgres } from '@chief-of-staff/db/testing';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -68,6 +72,7 @@ import {
  */
 
 let postgres: TestPostgres;
+let harness: JobHarness;
 // Taken from the factory rather than imported: Fastify belongs to the API
 // package, and everything here is a client of the server it starts.
 /**
@@ -95,6 +100,11 @@ const A_WATCH = {
 beforeAll(async () => {
   postgres = await startTestPostgres();
   await runMigrations(postgres.connectionString);
+  harness = createJobHarness({
+    connectionString: postgres.connectionString,
+    schema: 'pgboss_frontdoor',
+  });
+  await harness.start();
   app = createApp({
     DATABASE_URL: postgres.connectionString,
     LOG_LEVEL: 'silent',
@@ -112,6 +122,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   try {
+    await harness.stop();
     await app.close();
   } finally {
     await postgres.stop();
@@ -179,6 +190,7 @@ function openFrontDoor(options: FrontDoorOptions): FrontDoor {
       TELEGRAM_RATE_LIMIT_NOTICE_SECONDS: '60',
     }),
     db: app.db,
+    harness,
     transformer: transport.transformer,
     botInfo: TEST_BOT_INFO,
     chatLoop: chatLoopOver(agent),
@@ -239,7 +251,17 @@ async function askQuestion(userId: string, question: string): Promise<string> {
     })
     .returning();
   if (task === undefined) throw new Error('the fixture task was not created');
-  await app.db.insert(taskEvents).values({ taskId: task.id, type: 'ask_user', payload: { question } });
+  const askedAt = Date.now();
+  await app.db.insert(taskEvents).values({
+    taskId: task.id,
+    type: 'ask_user',
+    payload: {
+      questionId: randomUUID(),
+      question,
+      askedAt: new Date(askedAt).toISOString(),
+      expiresAt: new Date(askedAt + 3_600_000).toISOString(),
+    },
+  });
   return task.id;
 }
 
@@ -454,7 +476,7 @@ describe('a message that answers a question a job asked', () => {
     // failure this routing exists to prevent.
     const written = await app.db.select().from(taskEvents);
     expect(written.filter((event) => event.type === 'user_reply')).toMatchObject([
-      { taskId, payload: { text: 'Southside' } },
+      { taskId, payload: { reply: 'Southside' } },
     ]);
     expect(door.llm.requests()).toEqual([]);
   });
