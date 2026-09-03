@@ -1,5 +1,44 @@
 # Handoff
 
+## 2026-09-03 · implementation · eval-gate
+
+### Where the frontier is
+
+- All five tasks are done. `mission-e2e` (4186f55) and `eval-scenarios` (910b749) finished with findings: each gate went red on a flake under load, not on the task's own proof (below). `eval-gate` finished at 373cc3a, with findings: `gate-gate` went red on one test only, the calendar-wiring sprint's `packages/web/src/auth-guard.integration.test.ts` strict-mode violation (1 failed, 1550 passed, 17 skipped); `check.mjs` stops at the failing step, so `build` and `build:web` did not run in that gate. The gate took 5 minutes on a quiet machine against 25 under contention.
+- `eval-gate` landed `packages/playbooks/src/agentic/eval/nightly.ts` (the baseline file's parser, the spend meter and cap, `runUnderCap`, the nightly report with its exit code and candidate baseline), `baseline.json` (every scenario at `pass`, by intent), `nightly.test.ts` (17 unit tests: the baseline manipulation proof, errored apart from failed, the wiring), `nightly.integration.test.ts` (the cap on the production path; the whole starting suite under a cap it never reaches), `live.integration.test.ts` (the nightly's suite: one test per scenario recording whatever it says, the last one the gate against the baseline, report and candidate written to `LIVE_EVAL_REPORT_DIR`), `.github/workflows/live-evals.yml` (cron `41 7 * * *`, `workflow_dispatch` with a `spend_cap_usd` input, the `ANTHROPIC_API_KEY` guard job, Testcontainers Postgres, `pnpm browsers --with-deps`, report artifact `if: always()`), `scripts/live-llm.mjs` (takes suite paths from argv; the eval live suite in the defaults) and the README paragraph on the baseline-by-PR convention.
+- Proofs on the row: `gate-red` (`Cannot find module './nightly.js'`), `gate-green` (unit, 17), `gate-loop` (integration, 2, on 55432), `gate-gate` (`node scripts/check.mjs`).
+- Next: the repair below, then `nah stage implementation-complete agentic-mode` (which refreshes stale greens itself; refresh them with bare finishes first, per the memory on stale proofs) and the hardening request.
+
+### Repair queued: the mission suite's flake
+
+- `packages/playbooks/src/agentic-mission.integration.test.ts` still has the 250 ms brittleness the evals were cured of: `refOf` throws on a stale digest when a site under load answers a click after the settle window, and its `actionTimeoutMs: 1_500` is the tightest in the workspace. The fix is the same `patiently` sequencer (read again, up to three times, when a label is not yet shown) and a 5 s action timeout, with the tool-sequence assertion reading past `tool:read` and the 26-call counts allowing one call per read. The patch is drafted (`patch-mission-suite.py` in this session's scratchpad); apply it, run the suite alone on 55432, then bare `nah task finish agentic-mode mission-e2e` to re-earn `mission-gate` and refresh the greens `scripts/live-llm.mjs` made stale. Coordinate the gate with the siblings first.
+- `patiently` then exists twice (the evals' `scenarios.ts` and the mission suite). Moving it into `agentic/testing/scripted-model.ts` touches a file every eval proof covers, so it waits for a task that touches both anyway; noted in DEFERRED.
+
+### Assumptions recorded
+
+- The bar is a file (`packages/playbooks/src/agentic/eval/baseline.json`), every scenario at `pass` before any live run: the spec's "fails below baseline" needs a baseline to exist before the first night, and the scripted suite already passes all eight. The first live run that disagrees is a report and a pull request, not a silent lowering.
+- The report exits 1 below baseline (a regression, or a listed scenario that did not run) and also when nothing at all came to a verdict: a night on which every scenario errored is not a pass, and a green badge over it would be the one outcome the workflow must never produce. Errored scenarios otherwise stand apart and count neither way, as the spec says.
+- The cap is checked before every scenario, never mid-run: a scenario runs whole or is reported as not run (an errored result whose error says `spend cap`). The runner's own budgets are what stop a looping model. Default 5 dollars; `LIVE_EVAL_SPEND_CAP_USD` or the dispatch input overrides.
+- The scripted eval suite already runs in `pnpm check` on every push (`check.yml`); the "CI blocks a deliberately regressed branch" clause is the sabotage test in `scripted.integration.test.ts`, and the unit test pins the wiring (push and pull_request triggers, `pnpm check`) rather than duplicating a workflow.
+- `live-evals.yml` is the first workflow that runs `scripts/live-llm.mjs`; the agent package's live suite and the agentic smoke still have no nightly of their own. The script runs all three with no arguments, so a workflow for them is a one-line addition.
+- The candidate baseline keeps the committed entry for every errored scenario, so copying it over the file after an outage night changes nothing that was not measured.
+
+### Findings
+
+- `mission-gate` (4186f55) went red on the eval suite's `gym-cancel` under gate load (the 250 ms settle window; fixed in the evals by `patiently` and a 5 s action timeout before `eval-scenarios` finished). `eval-gate` (910b749, the proof on the eval-scenarios row) went red on two other flakes under load: the mission suite's "walks the site through the tools" (task failed; the repair above) and `packages/web/src/auth-guard.integration.test.ts:178`, a strict-mode violation in the web package (`getByRole('alert')` also matches Next's route announcer), which is the calendar-wiring sprint's file. Both were recorded as findings on the finishes and handed to hardening.
+- The Postgres on 55432 was contended on 2026-09-03 when this session's eval runs overlapped the calendar-wiring gate; the siblings agreed that no vitest of one session runs while a gate of another is running, checked in the foreground before every finish. calendar-wiring handed the tree over at 05:22Z, earlier than its 90-minute window, on reaching implementation-complete.
+
+### Environment
+
+- Postgres proofs need `TEST_DATABASE_URL=postgres://postgres:nahtest@127.0.0.1:55432/postgres` (the throwaway server); the embedded rung times out under `check.mjs` parallelism.
+- No `ANTHROPIC_API_KEY` locally or in the repository's GitHub secrets: every live suite skips with the reason in its name, and both nightly guard jobs skip rather than pass. The owner's decision; escalated in DEFERRED.
+- Siblings share the working tree: calendar-wiring (`chief-of-staff-b9`, in hardening; will message before its first gate) and slot-sniping (`chief-of-staff-32`, in hardening).
+- The local clock is UTC-4; NAH ledgers are in UTC.
+
+### Resume
+
+- `nah implement s6`; apply the mission-suite patch, run the suite alone, bare-finish `mission-e2e` in a quiet window, then `nah stage implementation-complete agentic-mode`.
+
 ## 2026-09-03 · implementation · mission-e2e and eval-scenarios
 
 ### Where the frontier is
@@ -201,6 +240,20 @@
 - Root blockers: none
 - Done: 2/5
 - Receipts: verification-completed-eventc5dffd1811e14aa281e72838d1c624c2, verification-completed-eventc1c01c5972264ed5a0f621725309f369, verification-completed-event90f555b4e8b448e483a15d3babb7a970, verification-completed-event6cbcab21bd1348089328e24acce131c1, verification-completed-event952b731c7c8a480c9d582dd1ac81addf, verification-completed-event8b6a910337714702bfd7c3093419e326, verification-completed-event2a68406192ac415ab59ac40fe3af83eb, verification-completed-event53e68f1006284bf783c5dbbcdd03c6c3, verification-completed-event791b8f9d6917470486b535954c8cef66, verification-completed-event2b6d6819c7e04ce083bde406e637113b, verification-completed-event5ee21a7d52e84222af1eb99582c96133, verification-completed-event0aef53dbdca945c5b07dba701f5b8e24
+- Findings: none
+- Assurance request: none
+- Knowledge revisions: none
+- Resume: `nah implement s6`
+
+<!-- nah-checkpoint:1940df70d6a128db -->
+## 2026-09-03T05:22:02.761Z · claude-code · b4c47fe6-9724-4b90-9dd4-2c37dd394dbf
+
+- Stage: implementation
+- Ready: eval-gate
+- In progress: none
+- Root blockers: none
+- Done: 4/5
+- Receipts: verification-completed-eventc5dffd1811e14aa281e72838d1c624c2, verification-completed-eventc1c01c5972264ed5a0f621725309f369, verification-completed-event90f555b4e8b448e483a15d3babb7a970, verification-completed-event6cbcab21bd1348089328e24acce131c1, verification-completed-event952b731c7c8a480c9d582dd1ac81addf, verification-completed-event8b6a910337714702bfd7c3093419e326, verification-completed-event2a68406192ac415ab59ac40fe3af83eb, verification-completed-event53e68f1006284bf783c5dbbcdd03c6c3, verification-completed-event791b8f9d6917470486b535954c8cef66, verification-completed-event2b6d6819c7e04ce083bde406e637113b, verification-completed-event5ee21a7d52e84222af1eb99582c96133, verification-completed-event0aef53dbdca945c5b07dba701f5b8e24, verification-completed-event6209fde634df4a568432a3297082a839, verification-completed-event3d5e587c4daf4037b5bd93ddb9b8a8d3, verification-completed-event25f855cf7f5b436ead7e6e1cb7e7dbe5, verification-completed-event5619b22630b947c49880e3d5699b82a6, verification-completed-eventd06cf127d7f84c8e96d115699b520fd7, verification-completed-event72000b359ab6420cbb460556df4dd794, verification-completed-event5586c944847840cf8279970d63264a72, verification-completed-event9fd14b0ef974440aa885caaa0b86cdd1
 - Findings: none
 - Assurance request: none
 - Knowledge revisions: none

@@ -22,3 +22,11 @@ Nothing deferred during bootstrap.
 - The suite runs scripted only. The live run of the same scenarios is `eval-gate`'s nightly, and until a key exists it too will skip.
 - `gym-hard-blocked` gives the person no reply, so a live model that asks for help parks the task (`needs_user`); a model that declares blocked ends `failed-blocked`. Both are accepted; the eval does not say which a good model should do.
 - Scenario `verify` reads the price off `task.result.detail` as text (`$49.00`), which ties `store-*` to the runner's succeeded-result shape. If the result ever carries a structured value, the assertion should read that instead.
+
+## eval-gate
+
+- The nightly (`.github/workflows/live-evals.yml`) has never run: no `ANTHROPIC_API_KEY` in the repository's secrets, so its guard job skips. The first run that does happen sets nothing itself; its report and candidate baseline arrive as the `live-evals` artifact, and moving the bar is a pull request over `packages/playbooks/src/agentic/eval/baseline.json`. Owner: the repository owner, for the secret.
+- Every baseline entry is `pass` by intent, from the scripted suite, not from a live run. A scenario a real model cannot pass yet will show as a regression on the first night, which is the honest reading: the bar was set before the evidence, and the first pull request that lowers it should say why.
+- The agent package's live suite (`packages/agent/src/live-llm.integration.test.ts`) and the agentic smoke still have no nightly of their own; `node scripts/live-llm.mjs` with no arguments runs all three, so a workflow for them is one more `run:` line, when someone wants the spend.
+- `patiently` (the read-again sequencer for scripted models) exists in `packages/playbooks/src/agentic/eval/scenarios.ts` and, after the mission-suite repair, in `packages/playbooks/src/agentic-mission.integration.test.ts`. Its home is `packages/playbooks/src/agentic/testing/scripted-model.ts`, beside `script`; moving it touches a file every eval proof covers, so it waits for a task that touches both anyway.
+- The report's exit code treats a night on which no scenario reached a verdict as a failure (not a regression, not a pass). If the workflow's owner would rather an outage night stay yellow than red, that is one line in `nightlyReport` and one test.
