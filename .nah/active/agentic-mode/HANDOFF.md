@@ -8,7 +8,8 @@
 - Why the re-earns: every done task had a covered file changed after its finish (`agentic/index.ts`, `packages/playbooks/package.json` and `pnpm-lock.yaml` after browser-toolset; `packages/core/src/index.ts`, `db/schema.ts`, `agentic/index.ts` and `packages/playbooks/tsconfig.json` after agentic-runner; `scripts/live-llm.mjs` after mission-e2e; `eval/outcome.ts` after eval-scenarios), so their greens were stale, and `implementation-complete` would otherwise refresh them detached, which the memory on stale proofs warns against. A bare `nah task finish agentic-mode <task>` reruns only what is stale and reuses the rest.
 - The mission suite's flake is repaired in the mission-e2e re-earn commit: `patiently` (read again, up to three times, when a label is not yet in the digest) replaces `script` for every policy, the action timeout is 5 s, the tool-sequence assertion reads past `tool:read`, and the 26-call counts allow one call per read. The suite passed alone (5 passed, 1 skipped) before the finish.
 - The auth-guard strict-mode defect is fixed in 0f32134 (`packages/web/src/auth-guard.integration.test.ts`): the "already been used" alert is now `getByRole('alert').filter({ hasText: /link/u })`, past Next's route announcer. The file came from the closed dashboard-read sprint (dadb287), so with no live owner it was an ordinary repository repair; calendar-wiring's session filed and closed NAH triage item 1 against the commit.
-- Next: `nah stage implementation-complete agentic-mode`, then the hardening request.
+- Implementation is complete and hardening is requested: request `hardening-h8bf987075ac76547`, raised 2026-09-03T06:27:34Z by `nah stage implementation-complete`, attempt `attempt-r029eb108bb114819b665496beb3945b3` terminal. The transition refreshed nothing and accepted one finding: eval-gate's `gate-gate` is missing a green receipt. Its only run was the red at 373cc3a (the auth-guard strict-mode defect, repaired in 0f32134), and the re-earn sweep looked for changed covered files, which never flags a receipt that was red to begin with. The same command has since passed four times on other tasks' receipts (77b51e4, 7a466fc, 29bcd8e, 911ab0d), so a bare `nah task finish agentic-mode eval-gate` inside the hardening attempt earns it in about five minutes; that moves the frontier and invalidates the request, which `nah harden` recovers (the memory on structured-sprint stage commands has the sequence).
+- Next: `/nah-harden agentic-mode`.
 
 ### Findings
 
@@ -17,7 +18,7 @@
 
 ### Resume
 
-- `nah implement s6`; `nah stage implementation-complete agentic-mode`; then the hardening request.
+- `/nah-harden agentic-mode`; re-earn eval-gate's `gate-gate` first (bare finish), recover the request, then the hardening pass.
 
 ## 2026-09-03 · implementation · eval-gate
 
