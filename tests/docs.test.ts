@@ -200,3 +200,114 @@ describe('.env.example', () => {
     expect(liveTelegramSkipReason(documented)).toContain(TELEGRAM_LIVE_FLAG);
   });
 });
+
+describe('docs/onboarding', () => {
+  const procedurePath = 'docs/onboarding/PROCEDURE.md';
+  const templatePath = 'docs/onboarding/RECORD-TEMPLATE.md';
+  const candidatesPath = 'docs/onboarding/CANDIDATES.md';
+  const exists = (path: string): boolean => existsSync(new URL(`../${path}`, import.meta.url));
+  const headings = (contents: string): string[] =>
+    [...contents.matchAll(/^##+ (.+)$/gmu)].map((match) => (match[1] ?? '').trim());
+
+  it('has a procedure a person can run from a candidate URL to a configured watch', () => {
+    expect(exists(procedurePath), `${procedurePath} does not exist`).toBe(true);
+    const procedure = read(`../${procedurePath}`);
+    // The steps the sprint names, each a section of its own, in the order they
+    // have to happen: nothing about a site is estimated before its terms are
+    // read, and nothing is configured before it is estimated.
+    const required = [
+      'Robots and terms',
+      'Fetch tier',
+      'Extractor bootstrap',
+      'Allowlist',
+      'Cost estimate',
+      'Check budget',
+      'Site connection',
+      'Anomalies',
+    ];
+    const found = headings(procedure);
+    const positions = required.map((section) =>
+      found.findIndex((heading) => heading.startsWith(section)),
+    );
+    for (const [index, section] of required.entries()) {
+      expect(positions[index], section).toBeGreaterThanOrEqual(0);
+    }
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+  });
+
+  it('only tells the reader to run scripts and open files that exist', () => {
+    const procedure = read(`../${procedurePath}`);
+    for (const match of procedure.matchAll(/`pnpm ([a-z:]+)`/gu)) {
+      expect(Object.keys(manifest.scripts), `pnpm ${match[1] ?? ''}`).toContain(match[1]);
+    }
+    const paths = [...procedure.matchAll(/`((?:docs|packages|scripts|tests|fixtures)\/[\w./-]+)`/gu)]
+      .map((match) => match[1] ?? '')
+      .filter((path) => !path.endsWith('/'));
+    expect(paths.length).toBeGreaterThan(0);
+    for (const path of paths) expect(exists(path), path).toBe(true);
+  });
+
+  it('has a record template with every field the sprint wants filled in', () => {
+    expect(exists(templatePath), `${templatePath} does not exist`).toBe(true);
+    const template = read(`../${templatePath}`);
+    for (const field of [
+      'Robots and terms',
+      'Tier justification',
+      'Cost estimate',
+      'Check budget',
+      'Anomalies and dispositions',
+      'Site connection',
+    ]) {
+      expect(template, field).toContain(field);
+    }
+  });
+
+  it('has a candidate shortlist that leaves the choice and the cost target to a person', () => {
+    expect(exists(candidatesPath), `${candidatesPath} does not exist`).toBe(true);
+    const candidates = read(`../${candidatesPath}`);
+    expect(candidates).toContain('cost target');
+    expect(candidates).toMatch(/open decision/iu);
+    // Every candidate is referred back to the procedure rather than onboarded
+    // here: the shortlist is an input to a decision, not a record of one.
+    expect(candidates).toContain(procedurePath);
+  });
+});
+
+describe('docs/RELEASE-CHECKLIST.md', () => {
+  const checklistPath = 'docs/RELEASE-CHECKLIST.md';
+  const exists = (path: string): boolean => existsSync(new URL(`../${path}`, import.meta.url));
+  const headings = (contents: string): string[] =>
+    [...contents.matchAll(/^##+ (.+)$/gmu)].map((match) => (match[1] ?? '').trim());
+  const ITEMS = [
+    'Secrets not in the repository',
+    'Session-leak ledger clean',
+    'Guardrail config armed',
+    'Replay spot-check',
+    'Cost review',
+  ];
+
+  it('exists, with every item the release gate names as a section of its own', () => {
+    expect(exists(checklistPath), `${checklistPath} does not exist`).toBe(true);
+    const found = headings(read(`../${checklistPath}`));
+    for (const item of ITEMS) expect(found, item).toContain(item);
+  });
+
+  it('gives every item a line for a name and a date, and ships each of them blank', () => {
+    // Attestation is a person's act: the file carries the place for it and
+    // nothing in it. A checklist that ships attested is one nobody read.
+    const checklist = read(`../${checklistPath}`);
+    const attestations = checklist.match(/^- Attested by:.*$/gmu) ?? [];
+    expect(attestations).toHaveLength(ITEMS.length);
+    for (const line of attestations) expect(line).toMatch(/^- Attested by:\s*$/u);
+    expect(checklist).toMatch(/name and date/iu);
+  });
+
+  it('carries the nights table and the cost target the nights are held to', () => {
+    const checklist = read(`../${checklistPath}`);
+    expect(headings(checklist)).toContain('Nights');
+    expect(checklist).toMatch(/^\| Date \| Verdict \| Cost \| Target \| Consecutive green \|$/mu);
+    expect(checklist).toMatch(/^Cost target: /mu);
+    expect(checklist).toContain('three consecutive green nights');
+    expect(checklist).toContain('.github/workflows/live-ops.yml');
+  });
+});
