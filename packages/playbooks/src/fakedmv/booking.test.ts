@@ -80,7 +80,11 @@ interface CalendarPage {
   readonly listed?: boolean;
 }
 
-/** Enough of a page for the re-check: the shell marker, the calendar list, and the slot's entry. */
+/**
+ * Enough of a page for the re-check: the shell marker, the calendar's
+ * heading, and the slot's entry by its `data-testid` hook - the surface the
+ * fixture keeps across its modes, which is all the playbook reads.
+ */
 function calendarPage(options: CalendarPage): { readonly page: Page; readonly visited: string[] } {
   const visited: string[] = [];
   const count = (present: boolean): (() => Promise<number>) => () => Promise.resolve(present ? 1 : 0);
@@ -90,6 +94,12 @@ function calendarPage(options: CalendarPage): { readonly page: Page; readonly vi
       return Promise.resolve(null);
     },
     getByText: () => ({}),
+    getByRole: (role: string, roleOptions: { name?: string }) => {
+      if (role !== 'heading' || roleOptions.name !== 'Appointments') {
+        throw new Error(`the fake page has no ${role} named ${roleOptions.name ?? ''}`);
+      }
+      return { count: count(options.calendar !== false) };
+    },
     locator: (selector: string) => {
       switch (selector) {
         case 'meta[name="fixture-state"]':
@@ -97,9 +107,7 @@ function calendarPage(options: CalendarPage): { readonly page: Page; readonly vi
             count: count(options.blocked === true),
             first: () => ({ getAttribute: () => Promise.resolve('fixture-state:blocked') }),
           };
-        case 'ul.dmv-slots':
-          return { count: count(options.calendar !== false) };
-        case 'li.dmv-slot':
+        case '[data-testid^="slot-"]':
           return { filter: () => ({ count: count(options.listed !== false) }) };
         default:
           throw new Error(`the fake page has no ${selector}`);

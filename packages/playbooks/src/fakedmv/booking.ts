@@ -161,9 +161,24 @@ function bodyText(page: Page): Promise<string> {
   return page.locator('body').innerText();
 }
 
+/*
+ * The calendar is read by the surface the fixture keeps across its modes -
+ * the heading, the visible text, the accessible names and the `data-testid`
+ * hooks - never by a class or a nesting, which `redesign` rotates
+ * (hostile-mode-surfaces). A redesigned calendar is the same calendar.
+ */
+
+/** Whether the page is the calendar at all: its heading, in either layout. */
+function calendarShown(page: Page): Promise<boolean> {
+  return page
+    .getByRole('heading', { name: 'Appointments', exact: true })
+    .count()
+    .then((count) => count > 0);
+}
+
 /** The calendar entry for exactly this slot, by the label the watch saw. */
 function slotEntry(page: Page, label: string): Locator {
-  return page.locator('li.dmv-slot').filter({ has: page.getByText(label, { exact: true }) });
+  return page.locator('[data-testid^="slot-"]').filter({ has: page.getByText(label, { exact: true }) });
 }
 
 /** A step that reads the task's input as a booking, and refuses to run on anything else. */
@@ -186,7 +201,7 @@ function bookingSteps(base: string): PlaybookStep[] {
   const availability = bookingStep('availability', async (page, input) => {
     await page.goto(`${base}/appointments`);
     if (await blocked(page)) return BLOCKED;
-    if ((await page.locator('ul.dmv-slots').count()) === 0) {
+    if (!(await calendarShown(page))) {
       return { kind: 'failed', reason: 'fakedmv did not show its calendar' };
     }
     if ((await slotEntry(page, input.slot.label).count()) === 0) {

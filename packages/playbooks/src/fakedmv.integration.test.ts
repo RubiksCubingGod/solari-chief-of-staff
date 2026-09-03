@@ -350,4 +350,42 @@ describe('the fakedmv booking', () => {
     expect(await bookings()).toEqual([]);
     expect(await openSlots()).toMatchObject([{ id: TUESDAY.id, status: 'open' }]);
   });
+
+  describe('under the redesigned calendar', () => {
+    // The fixture's `redesign` rotates every class, id and nesting and keeps
+    // the semantic surface - visible text, accessible names, data-testid
+    // hooks - byte-identical (hostile-mode-surfaces). The booking arm reads
+    // that surface, so a redesign is not a reason to lose a slot.
+    it('books the slot, with the record in the fixture and the reference on the task', async () => {
+      await dmv.control.setMode('redesign');
+      const worker = await startWorker();
+
+      const timeline = await run(worker, input(true));
+
+      expect(timeline.task.status, JSON.stringify(lastTransition(timeline))).toBe('succeeded');
+      const [booking, ...rest] = await bookings();
+      expect(rest).toEqual([]);
+      expect(booking).toMatchObject({ slotId: TUESDAY.id, name: APPLICANT.name, reference: expect.stringMatching(REFERENCE) as string });
+      expect(parseBookSlotBooked(timeline.task.result)).toEqual({ reference: booking?.reference, bookedAt: booking?.bookedAt });
+      expect(trail(timeline)).toEqual(['transition:started', ...BOOKED, 'transition:succeeded']);
+      expect(await openSlots()).toEqual([]);
+    });
+
+    it('reads a slot that is not offered as slot-gone, the same refusal as on the normal calendar', async () => {
+      await dmv.control.setMode('redesign');
+      await dmv.control.withdrawSlot(TUESDAY.id);
+      const worker = await startWorker();
+
+      const timeline = await run(worker, input(true));
+
+      expect(timeline.task.status).toBe('failed');
+      const last = lastTransition(timeline);
+      expect(last).toMatchObject({
+        cause: 'refused',
+        detail: { reason: `availability: fakedmv no longer offers ${TUESDAY.label}`, detail: { code: 'slot-gone' } },
+      });
+      expect(bookSlotRefusal(last.detail)).toBe('slot-gone');
+      expect(await dmv.control.state()).toMatchObject({ mode: 'redesign', slots: [], bookings: [] });
+    });
+  });
 });
