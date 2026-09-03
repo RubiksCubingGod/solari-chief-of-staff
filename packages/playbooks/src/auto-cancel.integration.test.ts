@@ -177,10 +177,17 @@ async function startWorker(options: WorkerOptions = {}): Promise<Worker> {
   };
 }
 
-async function createPerson(options: { readonly connected?: boolean } = {}): Promise<string> {
+/** A person with a chat to be asked over and, unless told otherwise, a connected gym. */
+async function createPerson(
+  options: { readonly connected?: boolean; readonly chat?: boolean } = {},
+): Promise<string> {
   const [user] = await database.db
     .insert(users)
-    .values({ email: `${randomUUID()}@example.test`, tz: 'UTC' })
+    .values({
+      email: `${randomUUID()}@example.test`,
+      tz: 'UTC',
+      telegramChatId: options.chat === false ? null : `chat-${randomUUID()}`,
+    })
     .returning();
   if (user === undefined) throw new Error('the user insert returned no row');
   if (options.connected !== false) {
@@ -468,6 +475,20 @@ describe('the auto-cancel arm', () => {
     expect(await worker.scan(LATER_THAT_DAY)).toMatchObject({ enqueued: 0, unlinked: 0 });
     expect(await entryOf(itemId)).toMatchObject({ annotatedAt: marked.annotatedAt });
     expect(await autoCancelsOf(itemId)).toHaveLength(1);
+  });
+
+  it('marks a flagged entry for attention when there is no chat to ask its person over, and creates no task', async () => {
+    const worker = await startWorker();
+    const userId = await createPerson({ chat: false });
+    const itemId = await createEntry(userId);
+
+    expect(await worker.scan(LEAD_DAY_NOON)).toMatchObject({ enqueued: 0, unlinked: 1 });
+    expect(await database.db.select().from(tasks)).toEqual([]);
+    expect(await autoCancelsOf(itemId)).toMatchObject([{ renewOn: RENEW_ON, state: 'unlinked', taskId: null }]);
+    // Said now, on the entry, rather than a day later as "nobody answered"
+    // a question that was never delivered.
+    expect((await entryOf(itemId)).annotationNote).toBe('Auto-cancel could not be armed for the renewal on 2026-09-12: no Telegram chat is bound to ask over.');
+    expect(asked(worker)).toEqual([]);
   });
 
   it('is unlinked when no playbook knows the site, or the entry names none', async () => {

@@ -15,7 +15,14 @@ import {
 import { createDatabase, type Database } from './client.js';
 import { createJobHarness, runWorker, type JobHarness } from './jobs.js';
 import { runMigrations } from './migrate.js';
-import { calendarItems, calendarReminders, users, type NewCalendarItem } from './schema.js';
+import {
+  calendarAutoCancels,
+  calendarItems,
+  calendarReminders,
+  tasks,
+  users,
+  type NewCalendarItem,
+} from './schema.js';
 import { startTestPostgres, type TestPostgres } from './testing/postgres.js';
 
 /**
@@ -90,6 +97,9 @@ function scriptedPort(): ScriptedPort {
 
 /** Noon on the lead day of a renewal on the 12th with the default three-day lead. */
 const LEAD_DAY_NOON = '2026-09-09T12:00:00Z';
+/** What the entry says when its person has no chat: the fact, and the way to fix it. */
+const UNBOUND_REMINDER_NOTE =
+  'No Telegram chat is bound, so the reminder owed on 2026-09-09 was not sent. Open your dashboard, ask it for a connection code, and send it to the bot as /start <code>.';
 const at = (iso: string) => () => new Date(iso);
 
 async function insertUser(tz = 'UTC'): Promise<string> {
@@ -273,6 +283,60 @@ describe('runCalendarScan', () => {
     expect(await remindersOf(itemId)).toMatchObject([
       { state: 'skipped_unbound', attempts: 1, error: null },
     ]);
+    // The skip is on the entry, where the dashboard reads, in the words that
+    // say what to do about it. A row in a table nobody reads is a silent drop.
+    expect(await markOn(itemId)).toEqual({ annotation: 'needs_attention', note: UNBOUND_REMINDER_NOTE });
+  });
+
+  it('never lets a skip cover a mark the person already made', async () => {
+    const userId = await insertUser();
+    const itemId = await insertItem(userId, { annotation: 'declined', annotationNote: 'You said no.' });
+    const port = scriptedPort();
+    port.script({ kind: 'unbound' });
+
+    await runCalendarScan({ db: database.db, send: port.send, now: at(LEAD_DAY_NOON) });
+
+    expect(await remindersOf(itemId)).toMatchObject([{ state: 'skipped_unbound' }]);
+    expect(await markOn(itemId)).toEqual({ annotation: 'declined', note: 'You said no.' });
+  });
+
+  it('records a flagged renewal as unlinked for a person with no chat to ask over, and creates no task', async () => {
+    const userId = await insertUser();
+    const itemId = await insertItem(userId, { autoCancel: true, action: { site: 'fakegym' } });
+    const port = scriptedPort();
+    port.script({ kind: 'unbound' });
+    const harness = createJobHarness({
+      connectionString: postgres.connectionString,
+      schema: `pgboss_${randomUUID().slice(0, 8)}`,
+      pollingIntervalSeconds: 0.5,
+    });
+    started.push(harness);
+    await harness.start();
+    const planned: string[] = [];
+
+    const report = await runCalendarScan({
+      db: database.db,
+      send: port.send,
+      harness,
+      now: at(LEAD_DAY_NOON),
+      cancellations: (item) => {
+        planned.push(item.id);
+        return Promise.resolve({ kind: 'task', input: { site: 'fakegym' } });
+      },
+    });
+
+    // Nobody can be asked, so nothing is armed: the planner is not consulted,
+    // no task exists to time out a day later, and the entry says why now.
+    expect(report).toMatchObject({ skipped: 1, enqueued: 0, unlinked: 1 });
+    expect(planned).toEqual([]);
+    expect(await database.db.select().from(tasks)).toEqual([]);
+    expect(await database.db.select().from(calendarAutoCancels)).toMatchObject([
+      { itemId, renewOn: '2026-09-12', state: 'unlinked', taskId: null },
+    ]);
+    expect(await markOn(itemId)).toEqual({
+      annotation: 'needs_attention',
+      note: 'Auto-cancel could not be armed for the renewal on 2026-09-12: no Telegram chat is bound to ask over.',
+    });
   });
 
   it('retries a failed send on the next scan, and gives up after the third', async () => {

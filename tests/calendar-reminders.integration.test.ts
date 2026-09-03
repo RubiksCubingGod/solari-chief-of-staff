@@ -199,5 +199,17 @@ describe('a reminder, end to end', () => {
     expect(await app.db.select().from(deliveries)).toEqual([]);
     const [reminder] = await app.db.select().from(calendarReminders);
     expect(reminder).toMatchObject({ state: 'skipped_unbound', deliveryId: null });
+
+    // The skip reaches the dashboard the way everything about an entry does:
+    // on the entry, through the same API the page reads.
+    const listed = await crud.request(userId, 'GET', '/calendar-items');
+    if (!listed.ok) throw new Error(`the calendar was refused: ${listed.reason}`);
+    expect(listed.body).toMatchObject([
+      {
+        name: 'Gym',
+        annotation: 'needs_attention',
+        annotationNote: 'No Telegram chat is bound, so the reminder owed on 2026-09-09 was not sent. Open your dashboard, ask it for a connection code, and send it to the bot as /start <code>.',
+      },
+    ]);
   });
 });

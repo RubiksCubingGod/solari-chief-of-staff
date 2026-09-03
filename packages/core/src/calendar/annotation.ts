@@ -4,8 +4,9 @@ import { memberGuard } from '../vocabulary.js';
  * The marks an engine leaves on a calendar entry, weakest first.
  *
  * - `late`: its reminder went out after the day it was owed.
- * - `needs_attention`: it asked to be auto-cancelled but nothing can act on it
- *   - no linked site, no playbook - so a person has to.
+ * - `needs_attention`: something an engine owed it could not be done - a
+ *   reminder with no chat to send it to, an auto-cancel with no linked site,
+ *   no playbook, or nobody to ask - so a person has to look.
  * - `declined`: the person said no to cancelling it. Do not ask again for this
  *   renewal, and do not let a later reminder erase the no.
  * - `handled`: the cancellation went through. The entry's story is over.

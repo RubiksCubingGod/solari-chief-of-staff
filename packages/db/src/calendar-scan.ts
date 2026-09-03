@@ -62,6 +62,13 @@ import { enqueueTaskRun } from './task-ledger.js';
  * renewal without reading the task's trail, and so an ending that happened
  * in another process, the bot's decline above all, is marked by the same
  * hand as the rest.
+ *
+ * A person with no Telegram chat bound is the case the whole scan has to
+ * stay honest about, because nothing here can reach them. Their reminder is
+ * recorded as skipped and their entry is marked with why and what to do; a
+ * flagged renewal of theirs is recorded as unlinked with the same reason
+ * rather than armed, since a task whose first act is a question nobody can
+ * receive would only park for a day and fail as unanswered.
  */
 
 export const CALENDAR_SCAN_QUEUE = 'calendar.scan';
@@ -76,6 +83,16 @@ export const CALENDAR_SCAN_CRON = '0 * * * *';
 export const REMINDER_SEND_FROM_HOUR = 9;
 /** How many times a failing send is tried, one per scan, before the reminder is left as failed. */
 export const REMINDER_SEND_ATTEMPTS = 3;
+
+/**
+ * The reason written onto an entry whose person cannot be reached, and what
+ * to do about it. The bot's own instructions, word for word, because the
+ * entry is where the person will read them.
+ */
+const NO_CHAT_BOUND = 'No Telegram chat is bound';
+const HOW_TO_BIND =
+  'Open your dashboard, ask it for a connection code, and send it to the bot as /start <code>.';
+const NOBODY_TO_ASK = 'no Telegram chat is bound to ask over';
 
 /** What became of one message handed to the port. */
 export type ReminderSendOutcome =
@@ -177,12 +194,12 @@ export async function runCalendarScan(options: CalendarScanOptions): Promise<Cal
   counts.settled = await settleEndedCancellations(db, now);
 
   const rows = await db
-    .select({ item: calendarItems, tz: users.tz })
+    .select({ item: calendarItems, tz: users.tz, chatId: users.telegramChatId })
     .from(calendarItems)
     .innerJoin(users, eq(users.id, calendarItems.userId))
     .where(eq(calendarItems.status, 'active'));
 
-  for (const { item, tz } of rows) {
+  for (const { item, tz, chatId } of rows) {
     // Their day and their hour, not the server's.
     const today = calendarDayIn(now, tz);
     if (hourIn(now, tz) < sendFromHour) continue;
@@ -198,7 +215,10 @@ export async function runCalendarScan(options: CalendarScanOptions): Promise<Cal
     if (arm !== undefined) {
       const cancel = autoCancelDue(entry, today);
       if (cancel !== undefined) {
-        const result = await armCancellation(db, arm, item, cancel, now);
+        // Whether there is anyone to ask is known here, from the same row the
+        // reminder was sent to; the planner is not consulted about a person
+        // it could not put a question to.
+        const result = await armCancellation(db, arm, item, cancel, now, chatId !== null);
         if (result !== undefined) counts[result] += 1;
       }
     }
@@ -231,6 +251,13 @@ async function sendReminder(
   const outcome = await send(item.userId, reminderMessage({ ...wording(item, due), today }));
   if (outcome.kind === 'unbound') {
     await settleReminder(db, claimed.id, { state: 'skipped_unbound', now });
+    // The skip is on the entry as well as on its row: the row is the scan's
+    // ledger and the entry is what the person reads. The rank rule keeps it
+    // from covering a decision they already made about the entry.
+    await annotateCalendarItem(db, item.id, 'needs_attention', {
+      note: `${NO_CHAT_BOUND}, so the reminder owed on ${due.dueOn} was not sent. ${HOW_TO_BIND}`,
+      now,
+    });
     return 'skipped';
   }
   if (outcome.kind === 'failed') {
@@ -267,11 +294,19 @@ async function armCancellation(
   item: CalendarItem,
   due: AutoCancelDue,
   now: Date,
+  reachable: boolean,
 ): Promise<AutoCancelResult | undefined> {
   // The row is the renewal's whole story; one that exists was decided.
   if ((await findAutoCancel(db, item.id, due.renewOn)) !== undefined) return undefined;
 
-  const plan = await arm.plan(item);
+  // A person nobody can ask gets no task. The confirm gate would hold the
+  // question for a day and then fail the task as unanswered, which is a mark
+  // blaming them for a question they never received. Decided before the
+  // planner is asked: which site the entry links to does not matter when
+  // there is nobody to say yes.
+  const plan: CancellationPlan = reachable
+    ? await arm.plan(item)
+    : { kind: 'unlinked', reason: NOBODY_TO_ASK };
   if (plan.kind === 'unlinked') {
     const record = await recordAutoCancel(db, item.id, due.renewOn, { state: 'unlinked' });
     if (!record.recorded) return undefined;
