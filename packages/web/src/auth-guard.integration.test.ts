@@ -257,7 +257,10 @@ describe('the dashboard guard', () => {
 
         expect(new URL(page.url()).pathname).toBe(REQUEST_LINK_PATH);
         expect(new URL(page.url()).searchParams.get('error')).toBe('invalid_link');
-        expect(await page.getByRole('alert').textContent()).toContain('already been used');
+        // The page's own alert, not Next's route announcer, which is a second
+        // empty role=alert once the page has hydrated.
+        const alert = page.getByRole('alert').filter({ hasText: /link/u });
+        expect(await alert.textContent()).toContain('already been used');
         // Refused all the way down: nothing was issued to the browser that
         // presented a spent link.
         expect(
