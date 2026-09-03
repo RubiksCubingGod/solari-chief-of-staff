@@ -23,6 +23,9 @@ function item(overrides: Partial<CalendarItem> & { readonly id: string }): Calen
     cancelBy: null,
     action: null,
     status: 'active',
+    annotation: null,
+    annotationNote: null,
+    annotatedAt: null,
     ...overrides,
   };
 }
@@ -175,6 +178,74 @@ describe('loadCalendarView', () => {
     // and the remainder are both negative, and printing them in sequence gives
     // "-23.-99".
     expect(view.rows[0]?.amount).toBe('-23.99');
+  });
+
+  it('carries the mark an engine left on an entry, in the reader’s words, with its note', async () => {
+    const note =
+      'Auto-cancel could not be armed for the renewal on 2026-09-12: no connected site for gym.example.test.';
+    const view = await loadCalendarView(
+      stubClient({
+        listCalendarItems: () =>
+          Promise.resolve([
+            item({
+              id: 'attention',
+              renewOn: '2026-09-12',
+              annotation: 'needs_attention',
+              annotationNote: note,
+              annotatedAt: '2026-09-09T12:00:00.000Z',
+            }),
+            item({
+              id: 'late',
+              renewOn: '2026-09-13',
+              annotation: 'late',
+              annotationNote: 'The reminder for 2026-09-10 went out on 2026-09-11.',
+              annotatedAt: '2026-09-11T09:00:00.000Z',
+            }),
+            item({
+              id: 'declined',
+              renewOn: '2026-09-14',
+              annotation: 'declined',
+              annotationNote: 'You said no to cancelling it before the renewal on 2026-09-14.',
+              annotatedAt: '2026-09-11T10:00:00.000Z',
+            }),
+            item({
+              id: 'handled',
+              renewOn: '2026-09-15',
+              annotation: 'handled',
+              annotationNote: 'Cancelled on 2026-09-12, ahead of the renewal on 2026-09-15.',
+              annotatedAt: '2026-09-12T09:00:00.000Z',
+            }),
+            item({ id: 'plain', renewOn: '2026-09-16' }),
+          ]),
+      }),
+    );
+
+    // Each mark in the words a reader would use for it, never the schema's,
+    // with the engine's note beside it word for word: the note is the one
+    // sentence that says what became of the entry and what to do about it.
+    expect(view.rows.map((row) => [row.id, row.mark])).toEqual([
+      ['attention', { label: 'Needs attention', note }],
+      ['late', { label: 'Late reminder', note: 'The reminder for 2026-09-10 went out on 2026-09-11.' }],
+      [
+        'declined',
+        {
+          label: 'Auto-cancel declined',
+          note: 'You said no to cancelling it before the renewal on 2026-09-14.',
+        },
+      ],
+      ['handled', { label: 'Cancelled', note: 'Cancelled on 2026-09-12, ahead of the renewal on 2026-09-15.' }],
+      ['plain', undefined],
+    ]);
+  });
+
+  it('shows a mark whose note is missing rather than dropping the mark with it', async () => {
+    const view = await loadCalendarView(
+      stubClient({
+        listCalendarItems: () => Promise.resolve([item({ id: 'bare', annotation: 'handled' })]),
+      }),
+    );
+
+    expect(view.rows[0]?.mark).toEqual({ label: 'Cancelled', note: undefined });
   });
 
   it('turns a refusal into the page state, with the reason the API gave', async () => {

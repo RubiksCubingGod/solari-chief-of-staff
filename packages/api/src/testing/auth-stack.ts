@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 import type {
+  CalendarAnnotation,
   CalendarItemKind,
   CalendarItemStatus,
   TaskEventType,
@@ -89,6 +90,9 @@ export interface SeedCalendarItem {
   readonly cancelBy?: string;
   readonly amountCents?: number;
   readonly status?: CalendarItemStatus;
+  /** The mark an engine left on the entry, with its note; unmarked by default. */
+  readonly annotation?: CalendarAnnotation;
+  readonly annotationNote?: string;
 }
 
 /** One planted calendar row, as the test now knows it. */
@@ -373,6 +377,9 @@ async function seedAccountOn(
         cancelBy: seed.cancelBy ?? null,
         action: null,
         status,
+        annotation: seed.annotation ?? null,
+        annotationNote: seed.annotationNote ?? null,
+        annotatedAt: seed.annotation === undefined ? null : new Date(),
       })
       .returning({ id: calendarItems.id });
     if (row === undefined) throw new Error(`the calendar item ${seed.name} was not created`);

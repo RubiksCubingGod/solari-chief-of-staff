@@ -1,4 +1,5 @@
 import type {
+  CalendarAnnotation,
   CalendarItemKind,
   CalendarItemStatus,
   FetchTier,
@@ -64,6 +65,13 @@ export interface CalendarItem {
   readonly cancelBy: string | null;
   readonly action: unknown;
   readonly status: CalendarItemStatus;
+  /**
+   * The mark an engine left on the entry, the engine's own sentence about it,
+   * and when it was left; all null for an entry nothing has happened to yet.
+   */
+  readonly annotation: CalendarAnnotation | null;
+  readonly annotationNote: string | null;
+  readonly annotatedAt: string | null;
 }
 
 export interface Task {

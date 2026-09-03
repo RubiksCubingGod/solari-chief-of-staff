@@ -91,6 +91,11 @@ const ADOBE = {
   kind: 'subscription',
   renewOn: '2026-12-01',
   amountCents: 2399,
+  // Marked the way the worker marks an entry it could not act on, so the page
+  // is proven to show the mark and the reason.
+  annotation: 'needs_attention',
+  annotationNote:
+    'Auto-cancel could not be armed for the renewal on 2026-12-01: no connected site for gym.example.test.',
 } as const;
 const MYSTERY = { name: 'Mystery charge', kind: 'subscription' } as const;
 
@@ -211,6 +216,24 @@ describe('the calendar page', () => {
         const undated = (await cardFor(page, MYSTERY.name).textContent()) ?? '';
         expect(undated).toContain('no date');
         expect(undated).toContain('not recorded');
+      }),
+    240_000,
+  );
+
+  it(
+    'shows the mark the worker left on an entry with its reason, and nothing on an entry it left alone',
+    async () =>
+      withPage(async (page) => {
+        await openAs(page, planner.email, '/calendar');
+
+        const marked = (await cardFor(page, ADOBE.name).textContent()) ?? '';
+        expect(marked).toContain('Needs attention');
+        expect(marked).toContain(ADOBE.annotationNote);
+
+        // The words for a mark appear only where there is one: a page that
+        // said "Needs attention" on every card would be crying wolf.
+        const plain = (await cardFor(page, ZOOM.name).textContent()) ?? '';
+        expect(plain).not.toContain('Needs attention');
       }),
     240_000,
   );

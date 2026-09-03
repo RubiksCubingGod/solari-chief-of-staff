@@ -62,6 +62,15 @@ function CalendarListItem({ row }: { readonly row: CalendarRow }) {
         <dd>{row.amount ?? 'not recorded'}</dd>
         <dt>Status</dt>
         <dd>{row.status}</dd>
+        {/* What an engine did about the entry, in the reader's words, with the
+            engine's own sentence about it. Nothing at all when nothing has
+            happened: an empty row here would be the page inventing news. */}
+        {row.mark === undefined ? null : (
+          <>
+            <dt>{row.mark.label}</dt>
+            <dd>{row.mark.note ?? 'no details recorded'}</dd>
+          </>
+        )}
       </dl>
     </article>
   );

@@ -1,4 +1,4 @@
-import type { CalendarItemKind, CalendarItemStatus } from '@chief-of-staff/core';
+import type { CalendarAnnotation, CalendarItemKind, CalendarItemStatus } from '@chief-of-staff/core';
 
 import type { ApiClient, CalendarItem } from '../api-client';
 import { describeRefusal } from '../api-refusal';
@@ -31,6 +31,18 @@ export interface CalendarRow {
   /** The amount as text, or `undefined` when the row carries none. */
   readonly amount: string | undefined;
   readonly status: CalendarItemStatus;
+  /**
+   * What an engine has done about the entry since it was written down, or
+   * `undefined` for one nothing has touched.
+   */
+  readonly mark: CalendarMark | undefined;
+}
+
+/** The mark an engine left on an entry, in the reader's words, with its note. */
+export interface CalendarMark {
+  readonly label: string;
+  /** The engine's own sentence about it, or `undefined` when it left none. */
+  readonly note: string | undefined;
 }
 
 export interface CalendarView {
@@ -65,7 +77,29 @@ function toRow(item: CalendarItem): CalendarRow {
     dateLabel: item.kind === 'deadline' ? 'Cancel by' : 'Renews',
     amount: renderAmount(item.amountCents),
     status: item.status,
+    mark: markOf(item),
   };
+}
+
+/**
+ * Each mark in the reader's words. The schema's names are the engine's - what
+ * rank a mark holds against the next - and a reader wants to know what it
+ * means for the entry: the reminder was late, somebody has to look at it, the
+ * person said no, or it is over.
+ */
+const MARK_LABELS: Readonly<Record<CalendarAnnotation, string>> = {
+  late: 'Late reminder',
+  needs_attention: 'Needs attention',
+  declined: 'Auto-cancel declined',
+  handled: 'Cancelled',
+};
+
+function markOf(item: CalendarItem): CalendarMark | undefined {
+  if (item.annotation === null) return undefined;
+  // A mark without a note is still a mark: the label is the fact and the note
+  // is the engine's account of it, and one arriving without the other is shown
+  // rather than dropped with it.
+  return { label: MARK_LABELS[item.annotation], note: item.annotationNote ?? undefined };
 }
 
 /**
