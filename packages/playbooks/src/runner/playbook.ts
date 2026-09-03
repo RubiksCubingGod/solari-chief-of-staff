@@ -38,6 +38,12 @@ export interface PlaybookContext {
   readonly answers: readonly TaskAnswer[];
   /** The latest accepted reply to exactly this question, or `undefined` while nobody has given one. */
   readonly answerTo: (question: string) => string | undefined;
+  /**
+   * Marks the connection expired, for a step that found the site no longer
+   * honours its session. Absent for an `open` playbook. The runner supplies
+   * it; a step only ever asks by failing with `reconnect`.
+   */
+  readonly expireConnection?: () => Promise<void>;
 }
 
 export type StepOutcome =
@@ -53,7 +59,17 @@ export type StepOutcome =
     }
   /** The step needs a person. The mission parks here and runs again once there is a reply. */
   | { readonly kind: 'ask'; readonly question: string }
-  | { readonly kind: 'failed'; readonly reason: string; readonly detail?: unknown }
+  | {
+      readonly kind: 'failed';
+      readonly reason: string;
+      readonly detail?: unknown;
+      /**
+       * The site asked for a full sign-in: the profile's session is gone. The
+       * runner flips the connection to `expired`, so the dashboard shows the
+       * person what to redo and no later task signs in with a dead session.
+       */
+      readonly reconnect?: boolean;
+    }
   /**
    * The site, or the person, would not do what the task asked: nothing broke
    * and there is nothing to retry. The task fails by `refused`, and `detail`

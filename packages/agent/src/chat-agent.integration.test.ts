@@ -51,6 +51,28 @@ const A_WATCH = {
   condition: { drops_below: 2000 },
 } as const;
 
+/** Where the API tells a person to go and press confirm. */
+const DASHBOARD = 'https://dashboard.example.test';
+
+/** An in-memory stand-in for the vendor's profiles: enough to mint and forget. */
+function scriptedProfiles() {
+  const profiles = new Map<string, { id: string; name: string }>();
+  let minted = 0;
+  return {
+    create: (name: string) => {
+      minted += 1;
+      const profile = { id: `prof_${String(minted)}`, name };
+      profiles.set(profile.id, profile);
+      return Promise.resolve(profile);
+    },
+    delete: (id: string) => {
+      profiles.delete(id);
+      return Promise.resolve();
+    },
+    list: () => Promise.resolve([...profiles.values()]),
+  };
+}
+
 async function createUser(): Promise<string> {
   const [created] = await app.db.insert(users).values({}).returning();
   if (created === undefined) throw new Error('the fixture user was not created');
@@ -60,11 +82,17 @@ async function createUser(): Promise<string> {
 beforeAll(async () => {
   postgres = await startTestPostgres();
   await runMigrations(postgres.connectionString);
-  app = createApp({
-    DATABASE_URL: postgres.connectionString,
-    LOG_LEVEL: 'silent',
-    SESSION_SECRET,
-  });
+  app = createApp(
+    {
+      DATABASE_URL: postgres.connectionString,
+      LOG_LEVEL: 'silent',
+      SESSION_SECRET,
+      DASHBOARD_BASE_URL: DASHBOARD,
+    },
+    // The vendor's profile store, scripted: `connect_site` mints a profile
+    // there, and this suite is about the link coming back, not the vendor.
+    { profileStore: scriptedProfiles() },
+  );
   // On a real socket rather than through `inject`: the tools are an HTTP client,
   // and a proof that skipped the transport would not exercise the one the bot
   // actually ships with.
@@ -352,5 +380,48 @@ describe('a refusal that came from somewhere else', () => {
     expect(turn.reply).toBe(LLM_UNAVAILABLE);
     expect(turn.reply).not.toBe(LLM_UNAVAILABLE_MIDWAY);
     expect(await listAs(ownerId, '/watches')).toEqual([]);
+  });
+});
+
+describe('connecting a site', () => {
+  it('hands the person the console link and the profile to look for, and connects nothing yet', async () => {
+    expect(CHAT_TOOL_NAMES, 'connect_site is not a chat tool').toContain('connect_site');
+    const { agent } = scripted(
+      useTool('connect_site', { siteDomain: 'gym.example.test' }),
+      say('Open the console, sign in to the gym in the profile named there, then press confirm.'),
+    );
+
+    const turn = await agent.respond({ userId: ownerId, text: 'connect my gym account' });
+
+    expect(turn.outcome).toBe('answered');
+    expect(turn.toolCalls.map((call) => call.name)).toEqual(['connect_site']);
+    const shown = JSON.parse(turn.toolCalls[0]?.result ?? '{}') as {
+      id: string;
+      status: string;
+      profileName: string;
+      editorUrl: string;
+      confirmUrl: string;
+    };
+    // What the model is given to relay: the only documented door for a person
+    // to log into a profile is the vendor console, and the name is how they
+    // find theirs in it. The password never passes through this chat.
+    expect(shown.status).toBe('started');
+    expect(shown.profileName).toContain('gym.example.test');
+    expect(shown.editorUrl).toBe('https://console.getsolari.com/profiles');
+    expect(shown.confirmUrl).toBe(`${DASHBOARD}/connect/${shown.id}`);
+    // Started is not connected: the row appears when the person confirms.
+    expect(await listAs(ownerId, '/site-connections')).toEqual([]);
+    const attempt = await app.inject({
+      method: 'GET',
+      url: `/site-connections/attempts/${shown.id}`,
+      headers: { cookie: mintSessionCookie(ownerId, SESSION_SECRET) },
+    });
+    expect(attempt.json()).toMatchObject({ id: shown.id, siteDomain: 'gym.example.test', status: 'started' });
+    // The attempt is the asker's, as every tool call is.
+    expect((await app.inject({
+      method: 'GET',
+      url: `/site-connections/attempts/${shown.id}`,
+      headers: { cookie: mintSessionCookie(strangerId, SESSION_SECRET) },
+    })).statusCode).toBe(404);
   });
 });

@@ -1,4 +1,12 @@
-export { createApp } from './app.js';
+export { DEFAULT_CONNECT_TIMEOUT_MS, createApp, type AppOptions, type ConnectSupport } from './app.js';
+export {
+  createConnectAttemptLedger,
+  profileNameFor,
+  type ConnectAttempt,
+  type ConnectAttemptLedger,
+  type ConnectAttemptLedgerOptions,
+  type ConnectAttemptStatus,
+} from './connect-attempts.js';
 export {
   MailerNotConfiguredError,
   createMailer,

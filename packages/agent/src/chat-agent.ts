@@ -87,6 +87,7 @@ Rules that matter more than being helpful:
 - create_task only queues work. Say it is queued; never say it is done.
 - When a tool refuses, tell the user the reason it gave, in your own words. Do not retry the same call unchanged.
 - Read before you write when the request names something you have not been given an id for.
+- connect_site never takes a password, and neither do you. Relay its editorUrl, profileName and confirmUrl word for word; the user signs in themselves.
 
 Keep replies short enough to read on a phone. No markdown headings, no bullet lists unless you are listing rows the user asked for.`;
 

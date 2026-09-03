@@ -144,3 +144,84 @@ The check history behind a sparkline: `200` with an array, oldest first, of
 A `to` that is not later than `from` is `400 bad_request`; an unknown query
 parameter is `400 validation_failed`. A watch that is not yours is `404
 not_found`.
+
+## Site connections
+
+A site connection is a browser profile the vendor holds with the person's login
+in it, named by a `site_connections` row. The API never sees a credential:
+connecting is an *attempt* that mints an empty profile, sends the person to the
+vendor console's profile editor to log in themselves, and writes the row on
+their word that they did. A task that later finds the session dead flips the
+row to `expired` through the playbook runner, which is what keeps that word
+honest.
+
+Every route needs a session. Without `SOLARI_API_KEY` on the server, every
+attempt route answers `503 upstream_unavailable` saying so; the read and patch
+routes still work.
+
+### The attempt
+
+```json
+{
+  "id": "…",
+  "siteDomain": "gym.example.com",
+  "status": "started",
+  "profileName": "gym.example.com (1f2e3d4c)",
+  "editorUrl": "https://console.getsolari.com/profiles",
+  "confirmUrl": "https://dashboard.example/connect/…",
+  "startedAt": "2026-09-03T03:40:00.000Z",
+  "expiresAt": "2026-09-03T03:55:00.000Z"
+}
+```
+
+`status` is one of `started`, `confirmed`, `cancelled`, `expired`. Attempts
+live in the API process: one that is still `started` when the server stops has
+its profile deleted, and a person redoes it. `profileName` is what to look for
+in the console's list; `editorUrl` is that list, overridable with
+`SOLARI_CONSOLE_URL`; `confirmUrl` is the dashboard page for the attempt.
+
+### The connection row
+
+```json
+{ "id": "…", "siteDomain": "gym.example.com", "status": "connected", "lastUsedAt": null }
+```
+
+`status` is `connected` or `expired`. The profile id the row names is the
+server's business and appears in no body.
+
+### `POST /site-connections/attempts`
+
+Body: `{ "siteDomain": "gym.example.com" }`. The value is a bare host as a
+browser prints it, lowercase, no scheme, no path, an optional port; anything
+else is `400 validation_failed` before the vendor is asked. Answers `201` with
+the attempt. A vendor refusal - the plan at its cap on profiles, a refused key -
+is `503 upstream_unavailable` with the vendor's sentence in `message`.
+
+### `GET /site-connections/attempts/:id`
+
+The attempt, for the person who started it. Anyone else's is `404`.
+
+### `POST /site-connections/attempts/:id/confirm`
+
+The person's word that the profile holds their login. Writes the connection
+row - a new one, or the existing row for that domain re-pointed at the new
+profile, in which case the old profile is deleted at the vendor - and answers
+`200` with the row. An attempt that is not `started` is `404`, so pressing
+confirm twice does nothing the second time.
+
+### `DELETE /site-connections/attempts/:id`
+
+Gives up: the profile is deleted and the attempt is `cancelled`. Answers `204`.
+An attempt that is not `started` is `404`.
+
+### `GET /site-connections`
+
+Every connection row the caller holds, by domain.
+
+### `PATCH /site-connections/:id`
+
+Body: `{ "status": "expired" }`, the one transition a person may ask for by
+hand. `connected` is only ever earned through an attempt and is
+`400 validation_failed` here. Answers `200` with the row; a stranger's row is
+`404`.
+

@@ -1,5 +1,6 @@
 import type { StepEventPayload } from '@chief-of-staff/core';
 import {
+  expireSiteConnection,
   readSiteConnection,
   recordBrowserSession,
   recordPlaybook,
@@ -178,6 +179,7 @@ export async function runSteps(
       case 'ask':
         return { kind: 'ask', question: outcome.question };
       case 'failed':
+        if (outcome.reconnect === true) await context.expireConnection?.();
         return outcome.detail === undefined
           ? { kind: 'failed', reason: `${step.name}: ${outcome.reason}` }
           : { kind: 'failed', reason: `${step.name}: ${outcome.reason}`, detail: outcome.detail };
@@ -219,6 +221,13 @@ async function signIn(
   return { kind: 'signed-in', connection, credential };
 }
 
+/** What a step that finds its session dead may call: the row flips to `expired`. */
+function expirer(db: TaskDatabase, connectionId: string): () => Promise<void> {
+  return async () => {
+    await expireSiteConnection(db, connectionId);
+  };
+}
+
 /** What an unmatched task fails with when nothing else will run it. */
 function runnerless(task: Task, reason: string): string {
   return task.mode === 'agentic' ? 'agentic mode has no runner yet' : reason;
@@ -248,7 +257,13 @@ export function createPlaybookMission(options: PlaybookRunnerOptions): Mission {
     const context: PlaybookContext = {
       task,
       input: choice.input,
-      ...(access.kind === 'signed-in' ? { connection: access.connection, credential: access.credential } : {}),
+      ...(access.kind === 'signed-in'
+        ? {
+            connection: access.connection,
+            credential: access.credential,
+            expireConnection: expirer(options.db, access.connection.id),
+          }
+        : {}),
       answers,
       answerTo: (question) => answerTo(answers, question),
     };

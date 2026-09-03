@@ -4,6 +4,7 @@ import { registerAuthRoutes } from './auth.js';
 import { registerBindingCodeRoutes } from './binding-codes.js';
 import { registerCalendarItemRoutes } from './calendar-items.js';
 import { registerObservationRoutes } from './observations.js';
+import { registerSiteConnectionRoutes } from './site-connections.js';
 import { registerTaskRoutes } from './tasks.js';
 import { registerWatchRoutes } from './watches.js';
 
@@ -22,4 +23,5 @@ export function registerRoutes(app: FastifyInstance): void {
   registerObservationRoutes(app);
   registerCalendarItemRoutes(app);
   registerTaskRoutes(app);
+  registerSiteConnectionRoutes(app);
 }

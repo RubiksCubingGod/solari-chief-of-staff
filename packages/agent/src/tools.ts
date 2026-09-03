@@ -34,10 +34,11 @@ import type { CrudClient, CrudMethod, CrudResponse } from './crud.js';
  */
 
 /**
- * The registered set, in the order the model sees them. `answer_pending` and
- * `connect_site` from §6 are not here: routing a reply to a waiting task is
- * `pending-question-routing`, and a live-login link needs the site connection
- * flow that sprint `site-connections` owns.
+ * The registered set, in the order the model sees them. `answer_pending` from
+ * §6 is not here: routing a reply to a waiting task is
+ * `pending-question-routing`. `connect_site` is, and is the one tool whose
+ * result the model relays rather than summarises: the person has to open the
+ * console link and press confirm themselves, so the words have to reach them.
  */
 export const CHAT_TOOL_NAMES = [
   'create_watch',
@@ -47,6 +48,7 @@ export const CHAT_TOOL_NAMES = [
   'list_calendar',
   'create_task',
   'get_task',
+  'connect_site',
 ] as const;
 
 export type ChatToolName = (typeof CHAT_TOOL_NAMES)[number];
@@ -230,6 +232,20 @@ export function createChatToolkit(options: ChatToolkitOptions): ChatToolkit {
       description: 'What became of one queued task: its status, and its result once it has one.',
       inputSchema: z.object({ taskId: z.string().describe('the id create_task gave back') }),
       run: (input) => call('get_task', input, 'GET', `/tasks/${input.taskId}`),
+    }),
+    betaZodTool({
+      name: 'connect_site',
+      description:
+        'Connect a site the user has an account on, so tasks there can act as them. ' +
+        'This never takes a password: it starts a login the user completes themselves in ' +
+        'the browser console. Give them the editorUrl, the profileName to open there, and ' +
+        'the confirmUrl to visit once they are signed in. Nothing is connected until they confirm.',
+      inputSchema: z.object({
+        siteDomain: z
+          .string()
+          .describe('the host of the site, e.g. gym.example.com, with no https:// and no path'),
+      }),
+      run: (input) => call('connect_site', input, 'POST', '/site-connections/attempts', input),
     }),
   ];
 

@@ -76,6 +76,9 @@ importers:
       '@chief-of-staff/db':
         specifier: workspace:*
         version: link:../db
+      '@chief-of-staff/solari':
+        specifier: workspace:*
+        version: link:../solari
       cron-parser:
         specifier: 5.10.0
         version: 5.10.0

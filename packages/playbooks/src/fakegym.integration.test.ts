@@ -13,6 +13,7 @@ import {
   createJobHarness,
   createUserAnswerSink,
   enqueueTaskRun,
+  readSiteConnection,
   readTaskTimeline,
   registerTaskEngine,
   runMigrations,
@@ -362,5 +363,16 @@ describe('the fakegym cancellation', () => {
     });
     expect(asked(worker)).toEqual([]);
     expect((await member()).status).toBe('active');
+    // And the connection now says so where the dashboard and the chat read it:
+    // expired, so the next thing the person sees is a reconnect link, and the
+    // next task on this site is refused up front instead of failing at login.
+    try {
+      const connection = await readSiteConnection(database.db, userId, gymHost());
+      expect(connection?.status, 'a refused sign-in did not flip the site connection to expired').toBe(
+        'expired',
+      );
+    } finally {
+      await database.db.update(siteConnections).set({ status: 'connected' });
+    }
   });
 });

@@ -16,6 +16,7 @@ const SECTIONS = [
   { href: '/watches', label: 'Watches' },
   { href: '/calendar', label: 'Calendar' },
   { href: '/tasks', label: 'Tasks' },
+  { href: '/connect', label: 'Sites' },
 ] as const;
 
 export const metadata: Metadata = {

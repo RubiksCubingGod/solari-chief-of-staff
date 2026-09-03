@@ -163,7 +163,7 @@ function cancellationSteps(base: string): PlaybookStep[] {
       if (credential.kind === 'profile') {
         // The site did not recognise the profile's session. Asking the person
         // for a password is not an option; reconnecting the site is.
-        return { kind: 'failed', reason: 'fakegym asked for a full sign-in; reconnect this site' };
+        return { kind: 'failed', reason: 'fakegym asked for a full sign-in; reconnect this site', reconnect: true };
       }
       await page.getByTestId('email').fill(credential.username);
       await page.getByTestId('password').fill(credential.password);
