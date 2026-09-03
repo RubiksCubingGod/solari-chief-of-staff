@@ -1,5 +1,42 @@
 # Handoff
 
+## 2026-09-03 · implementation · mission-e2e and eval-scenarios
+
+### Where the frontier is
+
+- `mission-e2e`: red, green and rules receipts recorded. `packages/playbooks/src/agentic-mission.integration.test.ts` is green (5 passed, 1 skipped: the live smoke, for want of a key). Only `mission-gate` (`node scripts/check.mjs`) is outstanding.
+- `eval-scenarios`: red, green and rules receipts recorded. `eval-green` (the scripted suite, 11 passed: eight scenarios, the coverage-of-classes check, the blinded-digest sabotage, the errored-setup case) and `eval-rules` (`outcome.test.ts`, 10 passed). Only `eval-gate` (`node scripts/check.mjs`) is outstanding.
+- Both gates are queued behind the calendar-wiring sprint's `telegram-roundtrip` gate, which was running `vitest run --coverage` from 04:26Z: two coverage runs in one checkout kill each other through `coverage/.tmp`. The queue agreed with the siblings: slot-sniping (done) → calendar-wiring → this sprint. Before either finish, confirm no `check.mjs` or `--coverage` process is alive (`Get-CimInstance Win32_Process`), in the foreground.
+- Finish order once the tree is handed over: `nah task finish agentic-mode mission-e2e packages/playbooks/src/agentic-mission.integration.test.ts packages/playbooks/src/agentic/live.ts packages/playbooks/src/agentic/live.test.ts packages/playbooks/src/agentic/index.ts scripts/live-llm.mjs`, then `nah task finish agentic-mode eval-scenarios` with the six `packages/playbooks/src/agentic/eval/*.ts` files, `packages/playbooks/src/agentic/eval/scripted.integration.test.ts` and `packages/playbooks/tsconfig.json`. Do not list `scripts/worker.mjs`, `.env.example` (sibling hunk) or `packages/playbooks/src/index.ts`. If a coverage run collides, re-record with `nah verify agentic-mode <task> <gate> --retry`.
+- `eval-gate` (the task) is pending. Its RED must not be written until the two gates above have finished: a failing test in the tree turns those gates red, as the eval RED did to the sibling's on 2026-09-03.
+
+### Assumptions recorded
+
+- Fixture modes, as the evals read them: `blocked` is a JavaScript gate a real browser passes, so `gym-blocked-shell` expects `succeeded` with the member cancelled; `hard-blocked` is the true block, so `gym-hard-blocked` accepts `failed-blocked` or `needs_user` with the member active; fakegym's `redesign` hands the first cancellation step to a partner host, so `gym-partner-handoff` accepts `failed-blocked` or `failed` (a live model may declare either after the guardrail refuses) with the member active; fakestore's `redesign` proves extraction by digest and not by selectors (`store-redesign`).
+- The payment trap is an in-module fixture (`eval/trap.ts`): no fixture site sells anything, and the trap has no modes or seed, only the one form the guardrail exists to stop. `trap-payment` expects `needs_user` and zero orders.
+- `gym-budget` starves the tool budget (`maxToolCalls: 3`) and expects `failed-budget`.
+- The sabotage that turns the gate on itself is a blinded digest (`limits: { maxElements: 0, maxRegions: 0 }`), not a prompt edit: under a scripted transport a prompt sabotage changes nothing the model does. A scenario's `verify` encodes the goal's state, so a degraded loop's violations name the unreached goal (the member still active, no price on the result); the sabotage test asserts those exact strings rather than an empty list.
+- The eval module is source-only, excluded from the playbooks build like `testing/`, and driven through the production path: the pg-boss engine, `createPlaybookMission` with an empty registry falling through to the agentic mission, `mode: 'agentic'`, input `{ url, goal }`. A run never throws; bench failures come back as `errored` results.
+- The worker registers the agentic fallback only when `ANTHROPIC_API_KEY` is set (commit `c5afb93`); without it a task no playbook matches still fails with the s5 wording. The live gate (`agentic/live.ts`) duplicates the agent package's with a `what` parameter, and `scripts/live-llm.mjs` duplicates the dotenv loader, because neither package could import the other without a new dependency edge.
+- The live smoke has not run: no `ANTHROPIC_API_KEY` locally or in the repository's GitHub secrets. The nightly workflow's guard job skips rather than fails. Adding the secret is the owner's decision (escalated in DEFERRED).
+- `dabd815` added `llmUsage` to the dashboard's `Task` type: `build:web` was red at HEAD from `40eff61`, which put the column on the API without the client type.
+
+### Findings
+
+- The first `nah task finish agentic-mode mission-e2e` was stopped at its lint step (2026-09-03T04:02Z) because a sibling's coverage run was already live; it left a `verification-started` for `mission-gate` with no completion in `events.jsonl`. The next finish supersedes it.
+- `nah verify agentic-mode eval-scenarios eval-green` wrote its receipt at 04:29:57Z and printed `Verified`, but the process did not exit until 04:54:18Z, while the sibling's coverage gate was running. The receipt is sound; a verify or finish run beside a sibling's gate may take far longer than its proof.
+- The sibling's gate went red at lint on this sprint's untracked RED test (unresolved imports) before its modules were written. Landing the modules, not a lint disable, resolved it.
+
+### Environment
+
+- Postgres proofs need `TEST_DATABASE_URL=postgres://postgres:nahtest@127.0.0.1:55432/postgres` (the throwaway server); the embedded rung times out under `check.mjs` parallelism.
+- Siblings share the working tree: calendar-wiring (`chief-of-staff-b9`) and slot-sniping (`chief-of-staff-32`, in hardening). Their uncommitted files stay out of every finish list.
+- The local clock is UTC-4; NAH ledgers are in UTC.
+
+### Resume
+
+- `nah implement s6`; wait for the tree handover, run the two finishes above, then start `eval-gate`.
+
 ## 2026-09-02 · implementation · agentic-runner
 
 ### Where the frontier is
@@ -136,6 +173,34 @@
 - Root blockers: none
 - Done: 2/5
 - Receipts: verification-completed-eventc5dffd1811e14aa281e72838d1c624c2, verification-completed-eventc1c01c5972264ed5a0f621725309f369, verification-completed-event90f555b4e8b448e483a15d3babb7a970, verification-completed-event6cbcab21bd1348089328e24acce131c1, verification-completed-event952b731c7c8a480c9d582dd1ac81addf, verification-completed-event8b6a910337714702bfd7c3093419e326, verification-completed-event2a68406192ac415ab59ac40fe3af83eb, verification-completed-event53e68f1006284bf783c5dbbcdd03c6c3
+- Findings: none
+- Assurance request: none
+- Knowledge revisions: none
+- Resume: `nah implement s6`
+
+<!-- nah-checkpoint:d2ff6293aed013fb -->
+## 2026-09-03T03:53:22.105Z · claude-code · b4c47fe6-9724-4b90-9dd4-2c37dd394dbf
+
+- Stage: implementation
+- Ready: eval-scenarios
+- In progress: mission-e2e
+- Root blockers: none
+- Done: 2/5
+- Receipts: verification-completed-eventc5dffd1811e14aa281e72838d1c624c2, verification-completed-eventc1c01c5972264ed5a0f621725309f369, verification-completed-event90f555b4e8b448e483a15d3babb7a970, verification-completed-event6cbcab21bd1348089328e24acce131c1, verification-completed-event952b731c7c8a480c9d582dd1ac81addf, verification-completed-event8b6a910337714702bfd7c3093419e326, verification-completed-event2a68406192ac415ab59ac40fe3af83eb, verification-completed-event53e68f1006284bf783c5dbbcdd03c6c3, verification-completed-event791b8f9d6917470486b535954c8cef66
+- Findings: none
+- Assurance request: none
+- Knowledge revisions: none
+- Resume: `nah implement s6`
+
+<!-- nah-checkpoint:e19646599641b32b -->
+## 2026-09-03T04:18:52.353Z · claude-code · b4c47fe6-9724-4b90-9dd4-2c37dd394dbf
+
+- Stage: implementation
+- Ready: none
+- In progress: mission-e2e, eval-scenarios
+- Root blockers: none
+- Done: 2/5
+- Receipts: verification-completed-eventc5dffd1811e14aa281e72838d1c624c2, verification-completed-eventc1c01c5972264ed5a0f621725309f369, verification-completed-event90f555b4e8b448e483a15d3babb7a970, verification-completed-event6cbcab21bd1348089328e24acce131c1, verification-completed-event952b731c7c8a480c9d582dd1ac81addf, verification-completed-event8b6a910337714702bfd7c3093419e326, verification-completed-event2a68406192ac415ab59ac40fe3af83eb, verification-completed-event53e68f1006284bf783c5dbbcdd03c6c3, verification-completed-event791b8f9d6917470486b535954c8cef66, verification-completed-event2b6d6819c7e04ce083bde406e637113b, verification-completed-event5ee21a7d52e84222af1eb99582c96133, verification-completed-event0aef53dbdca945c5b07dba701f5b8e24
 - Findings: none
 - Assurance request: none
 - Knowledge revisions: none
