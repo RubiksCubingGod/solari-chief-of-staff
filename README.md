@@ -74,7 +74,9 @@ set: every hour, and once at startup, it finds the entries whose lead day has
 come on each person's own calendar and sends each one message, in that
 person's morning. A reminder is recorded before it is sent, so a scan that
 runs twice or dies halfway never sends twice; a send that fails is retried by
-the next scan, three times at most, and every outcome is on the entry.
+the next scan, three times at most, and every outcome is on the entry. A
+person with no Telegram chat bound gets no message; their entry is marked
+`needs_attention` with the reminder it missed and how to bind a chat.
 Without the token the worker says so at startup and runs everything else.
 
 A subscription flagged `autoCancel` gets more than a reminder. On its lead
@@ -85,9 +87,10 @@ the task's first act is to ask, over Telegram, before it opens a browser:
 ahead, or no to leave it as it is.` A plain yes runs the playbook, a plain
 no ends the task without running any of it, and anything else is asked
 again. When the task ends, the entry is marked with what became of it -
-handled, declined, or what went wrong - and a flagged entry with no playbook
-or no connected site is marked `needs_attention` with the reason instead of
-becoming a task. Each renewal is armed once, however many scans see it. `pnpm bot`
+handled, declined, or what went wrong - and a flagged entry with no playbook,
+no connected site, or no bound Telegram chat to ask over is marked
+`needs_attention` with the reason instead of becoming a task. Each renewal
+is armed once, however many scans see it. `pnpm bot`
 carries replies back: a message from someone a task is waiting on is handed
 to that task rather than to the assistant. The assistant itself is not on
 that process yet - the credential the chat tools present to the API is the
