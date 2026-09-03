@@ -1,5 +1,24 @@
 # Handoff
 
+## 2026-09-03 · implementation · re-earning the gates before implementation-complete
+
+### Where the frontier is
+
+- All five tasks are done and every gate has been re-earned on a quiet machine, one finish after another: mission-e2e at 77b51e4 (gate green: 156 files, 1551 tests, build and build:web), eval-scenarios at 7a466fc (green), agentic-runner at 29bcd8e (green), browser-toolset at 43a16b9 with findings (the red below) and again at 911ab0d (gate green: 156 files, 1551 tests, build and build:web). eval-gate's proofs (373cc3a) were already current.
+- Why the re-earns: every done task had a covered file changed after its finish (`agentic/index.ts`, `packages/playbooks/package.json` and `pnpm-lock.yaml` after browser-toolset; `packages/core/src/index.ts`, `db/schema.ts`, `agentic/index.ts` and `packages/playbooks/tsconfig.json` after agentic-runner; `scripts/live-llm.mjs` after mission-e2e; `eval/outcome.ts` after eval-scenarios), so their greens were stale, and `implementation-complete` would otherwise refresh them detached, which the memory on stale proofs warns against. A bare `nah task finish agentic-mode <task>` reruns only what is stale and reuses the rest.
+- The mission suite's flake is repaired in the mission-e2e re-earn commit: `patiently` (read again, up to three times, when a label is not yet in the digest) replaces `script` for every policy, the action timeout is 5 s, the tool-sequence assertion reads past `tool:read`, and the 26-call counts allow one call per read. The suite passed alone (5 passed, 1 skipped) before the finish.
+- The auth-guard strict-mode defect is fixed in 0f32134 (`packages/web/src/auth-guard.integration.test.ts`): the "already been used" alert is now `getByRole('alert').filter({ hasText: /link/u })`, past Next's route announcer. The file came from the closed dashboard-read sprint (dadb287), so with no live owner it was an ordinary repository repair; calendar-wiring's session filed and closed NAH triage item 1 against the commit.
+- Next: `nah stage implementation-complete agentic-mode`, then the hardening request.
+
+### Findings
+
+- The gate takes about five minutes on a quiet machine and about twenty-five with a sibling's coverage run beside it; three of this sprint's gates went red on timing flakes under that contention (the eval suite's settle window, the mission suite's, the auth-guard race), each since repaired at its source rather than by a retry.
+- The browser-toolset re-earn gate at 43a16b9 went red on `packages/web/src/task-detail-page.integration.test.ts`, two tests: the player never appeared, and the corrupt recording's alert read "could not be fetched: the server answered 404" where "could not be played" was expected. The dashboard's own `/tasks/<id>/recording` route answered 404, twice each, for two of the planner's seeded tasks whose pages had just answered 200, all in one dashboard instance. The only 404s on that path are the API's `ownedTask` and "has no recording" branches, and the test stack logs silently, so which one fired is not on record. Not reproduced: the suite alone passes in 21 s with the route answering 200 and 502 as designed; the whole integration project (55 files) passes under load in 144 s with no recording 404; the four other gates today logged none. Excluded: a cross-suite database collision (each stack creates its own `nah_test_<uuid>` database), a shared build directory (each dashboard instance has its own `.next/instance-<uuid>`), and sibling processes (none alive; `coverage/.tmp` empty). The file is the closed action-playbooks sprint's (ee41ba3). Handed to hardening as a one-in-seven flake with its symptom, not a repair; noted in DEFERRED.
+
+### Resume
+
+- `nah implement s6`; `nah stage implementation-complete agentic-mode`; then the hardening request.
+
 ## 2026-09-03 · implementation · eval-gate
 
 ### Where the frontier is
@@ -254,6 +273,20 @@
 - Root blockers: none
 - Done: 4/5
 - Receipts: verification-completed-eventc5dffd1811e14aa281e72838d1c624c2, verification-completed-eventc1c01c5972264ed5a0f621725309f369, verification-completed-event90f555b4e8b448e483a15d3babb7a970, verification-completed-event6cbcab21bd1348089328e24acce131c1, verification-completed-event952b731c7c8a480c9d582dd1ac81addf, verification-completed-event8b6a910337714702bfd7c3093419e326, verification-completed-event2a68406192ac415ab59ac40fe3af83eb, verification-completed-event53e68f1006284bf783c5dbbcdd03c6c3, verification-completed-event791b8f9d6917470486b535954c8cef66, verification-completed-event2b6d6819c7e04ce083bde406e637113b, verification-completed-event5ee21a7d52e84222af1eb99582c96133, verification-completed-event0aef53dbdca945c5b07dba701f5b8e24, verification-completed-event6209fde634df4a568432a3297082a839, verification-completed-event3d5e587c4daf4037b5bd93ddb9b8a8d3, verification-completed-event25f855cf7f5b436ead7e6e1cb7e7dbe5, verification-completed-event5619b22630b947c49880e3d5699b82a6, verification-completed-eventd06cf127d7f84c8e96d115699b520fd7, verification-completed-event72000b359ab6420cbb460556df4dd794, verification-completed-event5586c944847840cf8279970d63264a72, verification-completed-event9fd14b0ef974440aa885caaa0b86cdd1
+- Findings: none
+- Assurance request: none
+- Knowledge revisions: none
+- Resume: `nah implement s6`
+
+<!-- nah-checkpoint:4f0e5a7c60f0d8e7 -->
+## 2026-09-03T05:52:07.983Z · claude-code · b4c47fe6-9724-4b90-9dd4-2c37dd394dbf
+
+- Stage: implementation
+- Ready: none
+- In progress: none
+- Root blockers: none
+- Done: 5/5
+- Receipts: verification-completed-eventc5dffd1811e14aa281e72838d1c624c2, verification-completed-eventc1c01c5972264ed5a0f621725309f369, verification-completed-event90f555b4e8b448e483a15d3babb7a970, verification-completed-event6cbcab21bd1348089328e24acce131c1, verification-completed-event952b731c7c8a480c9d582dd1ac81addf, verification-completed-event8b6a910337714702bfd7c3093419e326, verification-completed-event2a68406192ac415ab59ac40fe3af83eb, verification-completed-event53e68f1006284bf783c5dbbcdd03c6c3, verification-completed-event791b8f9d6917470486b535954c8cef66, verification-completed-event2b6d6819c7e04ce083bde406e637113b, verification-completed-event5ee21a7d52e84222af1eb99582c96133, verification-completed-event0aef53dbdca945c5b07dba701f5b8e24, verification-completed-event6209fde634df4a568432a3297082a839, verification-completed-event3d5e587c4daf4037b5bd93ddb9b8a8d3, verification-completed-event25f855cf7f5b436ead7e6e1cb7e7dbe5, verification-completed-event5619b22630b947c49880e3d5699b82a6, verification-completed-eventd06cf127d7f84c8e96d115699b520fd7, verification-completed-event72000b359ab6420cbb460556df4dd794, verification-completed-event5586c944847840cf8279970d63264a72, verification-completed-event9fd14b0ef974440aa885caaa0b86cdd1, verification-completed-event6ede281bf2d04c17843646ec906e9b73, verification-completed-event28ebf50276ec4ee9ba30e8e8453056e1, verification-completed-event9747f7ff3725417e88b35afa3549358f, verification-completed-event3325552854d34d80b35ff9c1d7121489, verification-completed-event13f9caa9c0f840daa16692012327bc62, verification-completed-eventcf5393ecfaa0408bb4bff077c3ce9062, verification-completed-eventde6fe1484e214cc2a097f0187e02f4fb, verification-completed-event887a6fb1141b43d6b04db0840da4c230
 - Findings: none
 - Assurance request: none
 - Knowledge revisions: none
