@@ -44,6 +44,7 @@ import {
   say,
   script,
   useTool,
+  useTools,
   type ModelPolicy,
   type ScriptedModel,
   type TokenUsage,
@@ -566,6 +567,30 @@ describe('the agentic mission', () => {
     expect(timeline.task.llmUsage).toMatchObject({ calls: 3 });
   });
 
+  it('strikes the password out of the outcome the model declares and the question it asks, as it does off the trail', async () => {
+    const question = `Is ${MEMBER.password} still the password you want me to use?`;
+    const worker = await startWorker({
+      policy: (request) => {
+        if (request.brief.includes('The person answered')) {
+          return declare('succeeded', `Signed in with ${MEMBER.password} and saw the member page`);
+        }
+        return request.turn === 1 ? useTool('navigate', { url: loginUrl() }) : useTool('ask_user', { question });
+      },
+      script: [{ kind: 'answer', reply: 'yes' }],
+    });
+    const timeline = await run(worker, await createTask());
+    expect(timeline.task.status).toBe('succeeded');
+    expect(worker.io.asked.map((asked) => asked.question)).toEqual([
+      'Is [redacted] still the password you want me to use?',
+    ]);
+    expect(timeline.task.result).toEqual({
+      mode: 'agentic',
+      status: 'succeeded',
+      detail: 'Signed in with [redacted] and saw the member page',
+    });
+    expect(JSON.stringify(timeline.events)).not.toContain(MEMBER.password);
+  });
+
   it('nudges a turn that used no tool, and that turn still spends a slot of the call budget', async () => {
     const worker = await startWorker({
       policy: script(say('Let me think about this.'), say('Still thinking.'), declare('succeeded', 'done')),
@@ -602,6 +627,34 @@ describe('the budgets', () => {
     expect(steps(timeline, 'tool:read')).toHaveLength(2);
     expect(timeline.task.llmUsage).toMatchObject({ calls: 3 });
     expect(timeline.task.llmUsage?.costUsd).toBeGreaterThan(0);
+  });
+
+  it('counts every tool call of a batched turn, and ends the mission when the batch spends the budget', async () => {
+    const worker = await startWorker({
+      policy: script(
+        useTools(
+          { name: 'navigate', input: { url: loginUrl() } },
+          { name: 'read', input: {} },
+          { name: 'read', input: {} },
+          { name: 'read', input: {} },
+        ),
+        declare('succeeded', 'never reached'),
+      ),
+      budgets: { maxToolCalls: 3 },
+    });
+    const timeline = await run(worker, await createTask());
+    expect(timeline.task.status).toBe('failed');
+    expect(lastTransition(timeline)).toMatchObject({
+      detail: {
+        reason: 'budget exhausted: tool calls (3 of 3)',
+        detail: { mode: 'agentic', status: 'budget', axis: 'tool_calls', used: 3, limit: 3 },
+      },
+    });
+    // One turn asked for four tools; three ran, which is what the trail shows and what the event counts.
+    expect(steps(timeline, 'tool:navigate')).toHaveLength(1);
+    expect(steps(timeline, 'tool:read')).toHaveLength(2);
+    expect(worker.model.requests()).toHaveLength(1);
+    expect(timeline.task.llmUsage).toMatchObject({ calls: 1 });
   });
 
   it('ends the mission failed when the token budget is spent, before acting on the call that spent it', async () => {
@@ -673,6 +726,20 @@ describe('the guardrails beneath the tools', () => {
     expect(worker.model.requests()).toHaveLength(2);
     expect(steps(timeline, 'tool:navigate')).toMatchObject([{ outcome: 'guardrail' }]);
     expect(steps(timeline, 'tool:read')).toMatchObject([{ outcome: 'guardrail' }]);
+  });
+
+  it('strikes the password out of the reason the guardrails word from the model’s own URL', async () => {
+    const outside = `${away()}/outside?token=${MEMBER.password}`;
+    const worker = await startWorker({
+      policy: script(useTool('navigate', { url: outside }), useTool('navigate', { url: outside })),
+    });
+    const timeline = await run(worker, await createTask());
+    expect(timeline.task.status).toBe('failed');
+    expect(lastTransition(timeline)).toMatchObject({
+      cause: 'violation',
+      detail: { reason: `navigation to ${away()}/outside?token=[redacted] is outside the task's allowlist` },
+    });
+    expect(JSON.stringify(timeline.events)).not.toContain(MEMBER.password);
   });
 
   it('lets the model declare the outcome after a violation, since that needs no page', async () => {

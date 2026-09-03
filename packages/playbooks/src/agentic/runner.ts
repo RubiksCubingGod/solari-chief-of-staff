@@ -12,14 +12,12 @@ import {
   readSiteConnection,
   readTaskTimeline,
   recordBrowserSession,
-  tasks,
+  recordTaskLlmUsage,
   type Mission,
   type MissionOutcome,
   type TaskDatabase,
 } from '@chief-of-staff/db';
 import { withBrowser, type BrowserProvider, type BrowserRequest } from '@chief-of-staff/solari';
-import { eq } from 'drizzle-orm';
-
 import {
   guardedRequest,
   installGuardrails,
@@ -169,6 +167,8 @@ export function createAgenticMission(options: AgenticMissionOptions): Mission {
     const log = async (payload: StepEventPayload): Promise<void> => {
       await step(redactSecrets(payload, secrets) as StepEventPayload);
     };
+    /** What the model wrote reaches the row and the person through the same scrub as the trail. */
+    const redact = (outcome: MissionOutcome): MissionOutcome => redactSecrets(outcome, secrets) as MissionOutcome;
     const timeline = await readTaskTimeline(options.db, task.id);
     const brief = missionBrief({
       kind: task.kind,
@@ -190,7 +190,7 @@ export function createAgenticMission(options: AgenticMissionOptions): Mission {
     let total: TaskLlmUsage = task.llmUsage ?? emptyTaskLlmUsage(model);
     const charge = async (answer: ModelAnswer): Promise<void> => {
       total = chargeLlmCall(total, answer.usage, pricing);
-      await options.db.update(tasks).set({ llmUsage: total }).where(eq(tasks.id, task.id));
+      await recordTaskLlmUsage(options.db, task.id, total);
       await log({
         name: 'llm',
         outcome: 'ok',
@@ -282,10 +282,10 @@ export function createAgenticMission(options: AgenticMissionOptions): Mission {
         const beforeTurn = checkBudgets(budgets, ledger, 'turn');
         if (beforeTurn !== undefined) return exhausted(beforeTurn);
         const turn = await askModel(messages);
-        if (turn.kind === 'ended') return turn.outcome;
+        if (turn.kind === 'ended') return redact(turn.outcome);
         const { answer } = turn;
         await charge(answer);
-        ledger = { ...chargeTokens(ledger, answer.usage), toolCalls: ledger.toolCalls + 1, elapsedMs: elapsed() };
+        ledger = { ...chargeTokens(ledger, answer.usage), elapsedMs: elapsed() };
         messages.push({ role: 'assistant', content: [...answer.content] });
         const afterTokens = checkBudgets(budgets, ledger, 'tokens');
         if (afterTokens !== undefined) return exhausted(afterTokens);
@@ -293,6 +293,8 @@ export function createAgenticMission(options: AgenticMissionOptions): Mission {
           return { kind: 'failed', reason: 'the model refused to continue', detail: { mode: 'agentic', status: 'failed' } };
         }
         if (answer.toolUses.length === 0) {
+          // A turn that asked for nothing still spends a call, or a model that only talks would never run out.
+          ledger = { ...ledger, toolCalls: ledger.toolCalls + 1 };
           messages.push({ role: 'user', content: NUDGE });
           continue;
         }
@@ -301,14 +303,15 @@ export function createAgenticMission(options: AgenticMissionOptions): Mission {
           ledger = { ...ledger, elapsedMs: elapsed() };
           const beforeTool = checkBudgets(budgets, ledger, 'tool');
           if (beforeTool !== undefined) return exhausted(beforeTool);
+          ledger = { ...ledger, toolCalls: ledger.toolCalls + 1 };
           const execution = await toolset.execute(use.name, use.input);
           results.push(
             execution.kind === 'error'
               ? { type: 'tool_result', tool_use_id: use.id, content: execution.text, is_error: true }
               : { type: 'tool_result', tool_use_id: use.id, content: execution.text },
           );
-          if (execution.kind === 'ask') return { kind: 'ask', question: execution.question };
-          if (execution.kind === 'outcome') return declared(execution);
+          if (execution.kind === 'ask') return redact({ kind: 'ask', question: execution.question });
+          if (execution.kind === 'outcome') return redact(declared(execution));
           if (execution.kind === 'error' && execution.failure.kind === 'guardrail') {
             const { stop } = execution.failure;
             // A payment gate is a question for the person, not a mistake to
@@ -316,7 +319,7 @@ export function createAgenticMission(options: AgenticMissionOptions): Mission {
             // confirmation is matched by.
             if (stop.kind === 'payment') return stopOutcome(stop);
             violations += 1;
-            if (violations >= 2) return stopOutcome(stop);
+            if (violations >= 2) return redact(stopOutcome(stop));
           }
         }
         messages.push({ role: 'user', content: results });

@@ -14,7 +14,7 @@ const budgets: AgenticBudgets = { maxToolCalls: 3, maxTokens: 1_000, maxWallMs: 
 const fresh: BudgetLedger = { toolCalls: 0, tokens: 0, elapsedMs: 0 };
 
 describe('the defaults', () => {
-  it('are the limits ARCHITECTURE §3.2 names: 40 turns, ten minutes, and a token cap', () => {
+  it('are the limits ARCHITECTURE §3.2 names: 40 tool calls, ten minutes, and a token cap', () => {
     expect(DEFAULT_AGENTIC_BUDGETS).toEqual({ maxToolCalls: 40, maxTokens: 400_000, maxWallMs: 600_000 });
   });
 });
@@ -26,12 +26,13 @@ describe('checkBudgets', () => {
     expect(checkBudgets(budgets, fresh, 'tool')).toBeUndefined();
   });
 
-  it('counts a turn as spent when the count reaches the limit, and only before a turn', () => {
+  it('counts tool calls as spent when the count reaches the limit, before a turn and before a tool alike', () => {
     const spent = { ...fresh, toolCalls: 3 };
     expect(checkBudgets(budgets, { ...fresh, toolCalls: 2 }, 'turn')).toBeUndefined();
+    expect(checkBudgets(budgets, { ...fresh, toolCalls: 2 }, 'tool')).toBeUndefined();
     expect(checkBudgets(budgets, spent, 'turn')).toEqual({ axis: 'tool_calls', used: 3, limit: 3 });
-    // The turn that reached the limit still gets to run its tools and be charged.
-    expect(checkBudgets(budgets, spent, 'tool')).toBeUndefined();
+    expect(checkBudgets(budgets, spent, 'tool')).toEqual({ axis: 'tool_calls', used: 3, limit: 3 });
+    // The tokens a call spent are counted on their own axis; the calls it asked for are not spent until each runs.
     expect(checkBudgets(budgets, spent, 'tokens')).toBeUndefined();
   });
 
@@ -58,7 +59,7 @@ describe('checkBudgets', () => {
     });
   });
 
-  it('ranks tokens over turns when both are spent', () => {
+  it('ranks tokens over tool calls when both are spent', () => {
     expect(checkBudgets(budgets, { toolCalls: 3, tokens: 1_000, elapsedMs: 0 }, 'turn')).toMatchObject({
       axis: 'tokens',
     });

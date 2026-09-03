@@ -8,6 +8,7 @@ import {
   type RejectionReason,
   type StepEventPayload,
   type TaskEventType,
+  type TaskLlmUsage,
   type TaskStatus,
   type TransitionCause,
   type TransitionEventPayload,
@@ -526,6 +527,16 @@ export async function recordBrowserSession(
     },
   };
   await appendWithin(db, taskId, 'step', payload);
+}
+
+/**
+ * Puts what the task's model calls have cost so far on its row - the column
+ * the dashboard and the evals read - replacing the last total. A runner
+ * writes it after every call, so a mission that ends on a budget or an
+ * outage leaves the spend it made on the row.
+ */
+export async function recordTaskLlmUsage(db: TaskDatabase, taskId: string, usage: TaskLlmUsage): Promise<void> {
+  await db.update(tasks).set({ llmUsage: usage }).where(eq(tasks.id, taskId));
 }
 
 /**

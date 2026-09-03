@@ -8,9 +8,9 @@ import { totalLlmTokens, type LlmUsage } from '@chief-of-staff/core';
  */
 export interface AgenticBudgets {
   /**
-   * Model turns. Every answer the model gives spends one, whether it called
-   * a tool, called a tool badly, or said something and called nothing: a
-   * turn that moves nothing forward still has to run out.
+   * Tool calls. Every tool the model asks for spends one, however many it
+   * asks for in a turn; a turn that asks for none spends one too, so a turn
+   * that moves nothing forward still has to run out.
    */
   readonly maxToolCalls: number;
   /** Every token the mission's calls touched: input, output, cache writes and cache reads. */
@@ -56,9 +56,11 @@ export function describeExhaustion(exhaustion: BudgetExhaustion): string {
 /**
  * Whether the mission may go on. Wall time is checked first because it is
  * the one a caller can least do anything about; then tokens, which the last
- * call may already have overspent; then turns. A limit is exhausted when the
- * count reaches it: the check runs before the thing it would admit, so the
- * limit is a count of things allowed, not of things attempted.
+ * call may already have overspent; then tool calls, before a turn and before
+ * each tool of one, so a turn that batches its calls spends them one by one.
+ * A limit is exhausted when the count reaches it: the check runs before the
+ * thing it would admit, so the limit is a count of things allowed, not of
+ * things attempted.
  */
 export function checkBudgets(
   budgets: AgenticBudgets,
@@ -71,7 +73,7 @@ export function checkBudgets(
   if (ledger.tokens >= budgets.maxTokens) {
     return { axis: 'tokens', used: ledger.tokens, limit: budgets.maxTokens };
   }
-  if (about === 'turn' && ledger.toolCalls >= budgets.maxToolCalls) {
+  if (about !== 'tokens' && ledger.toolCalls >= budgets.maxToolCalls) {
     return { axis: 'tool_calls', used: ledger.toolCalls, limit: budgets.maxToolCalls };
   }
   return undefined;

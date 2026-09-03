@@ -131,7 +131,7 @@ describe('missionBrief', () => {
       'Allowed host: gym.example. The guardrails refuse navigation to any other host.',
       describeCredential(undefined),
       'Task input: {"url":"https://gym.example/account"}',
-      'Budget: at most 40 turns and 400000 tokens, within 600 seconds of wall time.',
+      'Budget: at most 40 tool calls and 400000 tokens, within 600 seconds of wall time.',
     ]);
   });
 

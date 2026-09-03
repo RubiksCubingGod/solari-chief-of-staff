@@ -79,6 +79,7 @@ export {
   readTaskTimeline,
   recordBrowserSession,
   recordPlaybook,
+  recordTaskLlmUsage,
   transitionTask,
   type AnswerOutcome,
   type AskOutcome,

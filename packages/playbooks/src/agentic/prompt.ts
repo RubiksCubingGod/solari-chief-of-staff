@@ -160,7 +160,7 @@ export function missionBrief(input: MissionBriefInput): string {
     `Allowed host: ${input.host}. The guardrails refuse navigation to any other host.`,
     describeCredential(input.credential),
     `Task input: ${JSON.stringify(input.input)}`,
-    `Budget: at most ${String(budgets.maxToolCalls)} turns and ${String(budgets.maxTokens)} tokens, within ${String(Math.round(budgets.maxWallMs / 1_000))} seconds of wall time.`,
+    `Budget: at most ${String(budgets.maxToolCalls)} tool calls and ${String(budgets.maxTokens)} tokens, within ${String(Math.round(budgets.maxWallMs / 1_000))} seconds of wall time.`,
   ];
   if (input.answers.length > 0) {
     lines.push('', 'The person answered:');

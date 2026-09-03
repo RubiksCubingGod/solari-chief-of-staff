@@ -156,9 +156,6 @@ importers:
       '@chief-of-staff/solari':
         specifier: workspace:*
         version: link:../solari
-      drizzle-orm:
-        specifier: 0.45.2
-        version: 0.45.2(@types/pg@8.23.1)(pg@8.23.0)
       playwright:
         specifier: 1.62.1
         version: 1.62.1
