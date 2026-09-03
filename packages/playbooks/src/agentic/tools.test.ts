@@ -8,8 +8,11 @@ import {
   describeToolFailure,
   interruptedByErrorPage,
   isToolName,
+  landedOn,
+  navigateThroughErrorPage,
   parseToolInput,
   trailDetail,
+  type NavigationPage,
   type ToolExecution,
   type ToolFailure,
 } from './tools.js';
@@ -171,6 +174,127 @@ describe('interruptedByErrorPage', () => {
     ).toBe(false);
     expect(interruptedByErrorPage(new Error('net::ERR_CONNECTION_REFUSED at http://127.0.0.1:9/'))).toBe(false);
     expect(interruptedByErrorPage('interrupted by another navigation to "chrome-error://"')).toBe(false);
+  });
+});
+
+const TARGET = 'http://127.0.0.1:4100/covered';
+const ELSEWHERE = 'http://127.0.0.1:4100/elsewhere';
+const ERROR_PAGE = 'chrome-error://chromewebdata/';
+
+/** Playwright's sentence for an ask cut short by `by` committing in its frame. */
+function interruptedBy(by: string): Error {
+  return new Error(`page.goto: Navigation to "${TARGET}" is interrupted by another navigation to "${by}"`);
+}
+
+interface NavigationScript {
+  /** What each ask does, in order: `undefined` lands, an error is thrown. */
+  readonly asks: readonly (Error | undefined)[];
+  /** Where the page stands after each ask, in order. */
+  readonly stands: readonly string[];
+  /** What waiting for the load does; it resolves by default. */
+  readonly load?: () => Promise<void>;
+}
+
+function scriptedPage(script: NavigationScript): {
+  readonly page: NavigationPage;
+  readonly asked: string[];
+  readonly counts: { settled: number; loads: number };
+} {
+  const asked: string[] = [];
+  const counts = { settled: 0, loads: 0 };
+  const page: NavigationPage = {
+    goto: (url) => {
+      const outcome = script.asks[asked.length];
+      asked.push(url);
+      return outcome === undefined ? Promise.resolve() : Promise.reject(outcome);
+    },
+    url: () => script.stands[asked.length - 1] ?? 'about:blank',
+    waitForLoad: async () => {
+      counts.loads += 1;
+      await (script.load ?? (() => Promise.resolve()))();
+    },
+    settle: () => {
+      counts.settled += 1;
+      return Promise.resolve();
+    },
+  };
+  return { page, asked, counts };
+}
+
+describe('landedOn', () => {
+  it('reads both addresses the way the browser does', () => {
+    expect(landedOn(TARGET, TARGET)).toBe(true);
+    expect(landedOn('http://127.0.0.1:4100', 'http://127.0.0.1:4100/')).toBe(true);
+    expect(landedOn(ERROR_PAGE, TARGET)).toBe(false);
+    expect(landedOn('not an address', TARGET)).toBe(false);
+  });
+});
+
+describe('navigateThroughErrorPage', () => {
+  it('lands in one ask when nothing interrupts it', async () => {
+    const { page, asked, counts } = scriptedPage({ asks: [undefined], stands: [TARGET] });
+    await navigateThroughErrorPage(page, TARGET);
+    expect(asked).toEqual([TARGET]);
+    expect(counts).toEqual({ settled: 0, loads: 0 });
+  });
+
+  it('passes on a failure of its own without asking again', async () => {
+    const refused = new Error(`page.goto: net::ERR_CONNECTION_REFUSED at ${TARGET}`);
+    const { page, asked, counts } = scriptedPage({ asks: [refused], stands: [ERROR_PAGE] });
+    await expect(navigateThroughErrorPage(page, TARGET)).rejects.toBe(refused);
+    expect(asked).toEqual([TARGET]);
+    expect(counts.settled).toBe(0);
+  });
+
+  it('is content when the first ask lands late, once the collision has settled', async () => {
+    const { page, asked, counts } = scriptedPage({
+      asks: [interruptedBy(ERROR_PAGE)],
+      stands: [TARGET],
+    });
+    await navigateThroughErrorPage(page, TARGET);
+    expect(asked).toEqual([TARGET]);
+    expect(counts).toEqual({ settled: 1, loads: 0 });
+  });
+
+  it('asks again when the collision cancelled the first ask', async () => {
+    const { page, asked, counts } = scriptedPage({
+      asks: [interruptedBy(ERROR_PAGE), undefined],
+      stands: [ERROR_PAGE, TARGET],
+    });
+    await navigateThroughErrorPage(page, TARGET);
+    expect(asked).toEqual([TARGET, TARGET]);
+    expect(counts).toEqual({ settled: 1, loads: 0 });
+  });
+
+  it('waits for the load when the second ask is overtaken by the first one landing', async () => {
+    const { page, asked, counts } = scriptedPage({
+      asks: [interruptedBy(ERROR_PAGE), interruptedBy(TARGET)],
+      stands: [ERROR_PAGE, TARGET],
+      load: () => Promise.reject(new Error('page.waitForLoadState: Timeout 20000ms exceeded')),
+    });
+    await navigateThroughErrorPage(page, TARGET);
+    expect(asked).toEqual([TARGET, TARGET]);
+    expect(counts).toEqual({ settled: 1, loads: 1 });
+  });
+
+  it('passes on the second ask being overtaken by a navigation elsewhere', async () => {
+    const elsewhere = interruptedBy(ELSEWHERE);
+    const { page, counts } = scriptedPage({
+      asks: [interruptedBy(ERROR_PAGE), elsewhere],
+      stands: [ERROR_PAGE, ELSEWHERE],
+    });
+    await expect(navigateThroughErrorPage(page, TARGET)).rejects.toBe(elsewhere);
+    expect(counts.loads).toBe(0);
+  });
+
+  it('passes on whatever else the second ask fails with', async () => {
+    const refused = new Error(`page.goto: net::ERR_CONNECTION_REFUSED at ${TARGET}`);
+    const { page, counts } = scriptedPage({
+      asks: [interruptedBy(ERROR_PAGE), refused],
+      stands: [ERROR_PAGE, TARGET],
+    });
+    await expect(navigateThroughErrorPage(page, TARGET)).rejects.toBe(refused);
+    expect(counts.loads).toBe(0);
   });
 });
 
