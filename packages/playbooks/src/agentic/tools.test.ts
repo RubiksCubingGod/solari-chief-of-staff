@@ -6,6 +6,7 @@ import {
   OUTCOME_STATUSES,
   TOOL_NAMES,
   describeToolFailure,
+  interruptedByErrorPage,
   isToolName,
   parseToolInput,
   trailDetail,
@@ -151,6 +152,25 @@ describe('describeToolFailure', () => {
 
   it.each(cases)('has words for %j', (failure, expected) => {
     expect(describeToolFailure(failure)).toBe(expected);
+  });
+});
+
+describe('interruptedByErrorPage', () => {
+  it('recognises the late error page of Chromium interrupting the next navigation, and nothing else', () => {
+    expect(
+      interruptedByErrorPage(
+        new Error(
+          'page.goto: Navigation to "http://127.0.0.1:59781/covered" is interrupted by another navigation to "chrome-error://chromewebdata/"',
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      interruptedByErrorPage(
+        new Error('page.goto: Navigation to "http://a/" is interrupted by another navigation to "http://b/"'),
+      ),
+    ).toBe(false);
+    expect(interruptedByErrorPage(new Error('net::ERR_CONNECTION_REFUSED at http://127.0.0.1:9/'))).toBe(false);
+    expect(interruptedByErrorPage('interrupted by another navigation to "chrome-error://"')).toBe(false);
   });
 });
 

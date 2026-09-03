@@ -287,6 +287,25 @@ export interface BrowserToolset {
   readonly latest: PageDigest | undefined;
 }
 
+/**
+ * Whether a navigation was cut short by Chromium's own error page landing
+ * late. A navigation that fails on the wire commits `chrome-error://` a
+ * moment afterwards; under load that moment can come after the model's next
+ * navigate has started, which then fails for a reason that is not its own.
+ * The sentence is Playwright's.
+ */
+export function interruptedByErrorPage(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message.includes('interrupted by another navigation to "chrome-error://')
+  );
+}
+
+/** Whether a navigation was cut short by any other navigation committing in its frame. */
+function interruptedByNavigation(error: unknown): boolean {
+  return error instanceof Error && error.message.includes('is interrupted by another navigation to "');
+}
+
 export const DEFAULT_ACTION_TIMEOUT_MS = 10_000;
 export const DEFAULT_NAVIGATION_TIMEOUT_MS = 20_000;
 /** How long after a click to watch for a navigation it may have started. */
@@ -459,9 +478,45 @@ export function createBrowserToolset(options: BrowserToolsetOptions): BrowserToo
     }
   }
 
+  /** Whether the page is at the address the model asked for, however the browser spells it. */
+  function landedOn(url: string): boolean {
+    try {
+      return new URL(page.url()).href === new URL(url).href;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * The navigation, seen through to the page when Chromium's error page from
+   * the last wire failure lands in the middle of it: `settle` waits for that
+   * page after a failure, but under load it can come later than the settle
+   * window allows. The navigation the model asked for may still land after
+   * the collision, or may have been cancelled with it and need asking again;
+   * asked again, it can be interrupted by the first one landing late, which
+   * leaves the page where it was asked to be.
+   */
+  async function goto(url: string): Promise<void> {
+    const options = { timeout: navigationTimeoutMs, waitUntil: 'load' as const };
+    try {
+      await page.goto(url, options);
+      return;
+    } catch (error) {
+      if (!interruptedByErrorPage(error)) throw error;
+    }
+    await settle();
+    if (landedOn(url)) return;
+    try {
+      await page.goto(url, options);
+    } catch (error) {
+      if (!interruptedByNavigation(error) || !landedOn(url)) throw error;
+      await page.waitForLoadState('load', { timeout: navigationTimeoutMs }).catch(() => undefined);
+    }
+  }
+
   async function navigate(args: ToolArgs<'navigate'>): Promise<ToolExecution> {
     try {
-      await page.goto(args.url, { timeout: navigationTimeoutMs, waitUntil: 'load' });
+      await goto(args.url);
     } catch (error) {
       // A navigation that failed on the wire leaves Chromium committing its
       // own error page. Let that land before answering, or the model's next

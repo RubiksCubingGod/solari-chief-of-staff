@@ -592,6 +592,16 @@ describe('typed failures', () => {
       expect(failure(await toolset.execute('read', {})).kind).toBe('page-error');
     });
   });
+
+  it('asks a navigation again when the error page of the last failure lands in the middle of it', async () => {
+    const port = await closedPort();
+    await bench(async ({ toolset, page }) => {
+      // Straight to the page, so nothing waits for Chromium's error page to land.
+      await page.goto(`http://127.0.0.1:${String(port)}/`).catch(() => undefined);
+      const covered = digestOf(await toolset.execute('navigate', { url: `${workshop.url}/covered` }));
+      expect(covered.elements.some((element) => element.label === 'Under the overlay')).toBe(true);
+    });
+  });
 });
 
 describe('under the guard', () => {
