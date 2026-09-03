@@ -145,6 +145,8 @@ export function summarize(results: readonly ScenarioResult[]): EvalSummary {
 export type BaselineEntry = 'pass' | 'fail';
 
 export interface Baseline {
+  /** For the reader of the file: what it is and how it moves. Kept as written. */
+  readonly note?: string;
   readonly scenarios: Readonly<Record<string, BaselineEntry>>;
 }
 

@@ -167,6 +167,17 @@ gate is itself tested: `tests/coverage-gate.test.ts` runs the suite over a
 fixture that deliberately leaves a branch unexercised and requires the run to
 fail.
 
+The agentic evals in `packages/playbooks/src/agentic/eval` run scripted inside
+`pnpm check`, the model played from each scenario's own script. The same
+scenarios run against the real model nightly (`.github/workflows/live-evals.yml`;
+by hand, `scripts/live-llm.mjs` with the suite's path) under the
+`LIVE_EVAL_SPEND_CAP_USD` cap, held to the committed
+`packages/playbooks/src/agentic/eval/baseline.json`. A scenario that passed at
+baseline and fails now is a regression and fails the job; one that errored is
+reported apart and counts neither way. The baseline moves only by editing that
+file in a pull request: the run leaves the baseline it would set as an
+artifact, and nobody commits it but a person.
+
 ## Configuration
 
 `.env.example` documents every variable the workspace reads, what it defaults

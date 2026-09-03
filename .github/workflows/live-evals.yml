@@ -1,0 +1,103 @@
+# The nightly live evals: the scenarios of packages/playbooks/src/agentic/eval
+# against the real model, held to the committed baseline.
+#
+# Deliberately not on `push` or `pull_request`. Every run spends model credit,
+# and a pull request from a fork cannot read the secret anyway - it would
+# report a green run that never called anything. The scripted run of the same
+# scenarios is in `pnpm check`, which every push goes through.
+#
+# The schedule is off the hour, because every workflow on GitHub that asks for
+# :00 is queued behind every other one that did; and off the live smoke's
+# minute, so the two never share a runner's worst hour.
+name: live-evals
+
+on:
+  schedule:
+    - cron: '41 7 * * *'
+  workflow_dispatch:
+    inputs:
+      spend_cap_usd:
+        description: 'The most this run may spend, in dollars'
+        required: false
+        default: '5'
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never two live runs at once: two suites on one key would both count
+  # against the same cap without either knowing. A queued run waits instead
+  # of being cancelled, so a manual dispatch cannot silently discard the
+  # nightly.
+  group: live-evals
+  cancel-in-progress: false
+
+jobs:
+  # The secret cannot be read from a job-level `if`, so the check is a job of
+  # its own. Its output is what lets the eval job report *skipped* rather than
+  # green when the key is missing - a green run that called nothing is the one
+  # outcome this workflow must never produce.
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      configured: ${{ steps.key.outputs.configured }}
+    steps:
+      - id: key
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            printf 'configured=true\n' >>"$GITHUB_OUTPUT"
+          else
+            printf 'configured=false\n' >>"$GITHUB_OUTPUT"
+            printf '::warning::ANTHROPIC_API_KEY is not configured; the live evals were skipped, not passed.\n'
+          fi
+
+  live-evals:
+    needs: guard
+    if: ${{ needs.guard.outputs.configured == 'true' }}
+    runs-on: ubuntu-latest
+    # Eight scenarios, each allowed eight minutes of a real model reading real
+    # pages, and the bench around them.
+    timeout-minutes: 90
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      # The cap the suite meters itself against. A dispatch may set it; the
+      # schedule takes the default.
+      LIVE_EVAL_SPEND_CAP_USD: ${{ inputs.spend_cap_usd || '5' }}
+      # Where the suite leaves its report and the baseline it would set.
+      LIVE_EVAL_REPORT_DIR: live-evals
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The evals drive a local headless Chromium against fixture sites the
+      # suite serves itself; `--with-deps` adds the shared libraries the
+      # runner image does not ship.
+      - run: pnpm browsers --with-deps
+
+      # The scenarios take the Testcontainers path here: the runner has a
+      # Docker daemon, so no TEST_DATABASE_URL is set and the bench gets a
+      # throwaway postgres:17-alpine.
+      - run: node scripts/live-llm.mjs packages/playbooks/src/agentic/eval/live.integration.test.ts
+
+      # The report and the candidate baseline, whatever the verdict. Raising
+      # the bar is a pull request that copies the candidate over
+      # packages/playbooks/src/agentic/eval/baseline.json - by a person, never
+      # by this job.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-evals
+          path: live-evals/
+          if-no-files-found: ignore
+          retention-days: 30

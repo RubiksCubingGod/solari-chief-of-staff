@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // The live model runs, run deliberately.
 //
-// Two suites talk to the real model: the chat loop's, in packages/agent, and
-// the agentic smoke, in packages/playbooks. Both skip unless ANTHROPIC_LIVE_LLM
-// opts in, which is what keeps `pnpm check` from spending money. This script
+// Three suites talk to the real model: the chat loop's, in packages/agent, the
+// agentic smoke and the agentic evals, in packages/playbooks. All skip unless
+// ANTHROPIC_LIVE_LLM opts in, which is what keeps `pnpm check` from spending money. This script
 // is the other side of that switch: how a human, or the nightly workflow, says
 // yes on purpose.
 //
@@ -17,11 +17,17 @@ import { fileURLToPath } from 'node:url';
 
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
 
-/** The suites, and the name every live test in them carries. */
+/** The suites run when none are named, and the name every live test in them carries. */
 const LIVE_SUITES = [
   'packages/agent/src/live-llm.integration.test.ts',
   'packages/playbooks/src/agentic-mission.integration.test.ts',
+  'packages/playbooks/src/agentic/eval/live.integration.test.ts',
 ];
+
+// A workflow that wants one suite names it: the nightly evals run under a
+// spend cap the smoke does not meter, and a failure in one should not hide
+// behind the other. With nothing named, everything live runs.
+const suites = process.argv.slice(2).length > 0 ? process.argv.slice(2) : LIVE_SUITES;
 const LIVE_TAG = '@live-llm';
 
 /**
@@ -72,7 +78,7 @@ if (apiKey === '') {
 // place in `pnpm check`, and a nightly that reran them would say nothing new.
 const child = spawn(
   process.execPath,
-  ['scripts/vitest.mjs', 'run', '--project', 'integration', '-t', LIVE_TAG, ...LIVE_SUITES],
+  ['scripts/vitest.mjs', 'run', '--project', 'integration', '-t', LIVE_TAG, ...suites],
   {
     cwd: repositoryRoot,
     stdio: 'inherit',
