@@ -5,9 +5,11 @@ deadlines those things create, and does the boring parts of acting on them —
 price and slot and change watches, a calendar of renewals and cancel-by dates,
 and cancellations carried out in a real browser.
 
-This repository is the substrate the engines land on: the workspace, the
-Postgres data model, the job harness, and the HTTP surface. `docs/ARCHITECTURE.md`
-is the design it implements; `docs/API.md` is the HTTP surface as a client sees it.
+Everything that runs it lives here: the watch engine and its fetch-tier ladder,
+the calendar of renewals and reminders, the browser playbooks that carry out a
+cancellation, the Telegram round-trip that asks before it acts, and the Next.js
+dashboard that shows the work. `docs/ARCHITECTURE.md` is the design it
+implements; `docs/API.md` is the HTTP surface as a client sees it.
 
 ## Requirements
 
@@ -137,9 +139,9 @@ To change the schema, edit `packages/db/src/schema.ts`, then run
 | `packages/db` | Drizzle schema, migrations, the shared Postgres client, and the pg-boss job harness. |
 | `packages/api` | The Fastify server: config, the typed error envelope, and the CRUD routes. |
 | `packages/solari` | The `BrowserProvider` seam every engine drives a browser through, and its implementations. |
-| `packages/agent` | The Claude layer — arrives in a later sprint. |
+| `packages/agent` | The Claude layer: writing a watch's extractor from the page when a key is set, and the agentic-eval harness that gates model behaviour. |
 | `packages/watch` | The watch engine: the fetch tier ladder, the Drizzle watch store, and the scheduled check that runs each watch. |
-| `packages/playbooks` | Scripted site flows — arrives in a later sprint. |
+| `packages/playbooks` | Scripted site flows (the fakegym cancellation the worker runs), the agentic mode, and the scenario evals under `packages/playbooks/src/agentic/eval`. |
 | `packages/bot` | The Telegram bot: the one runtime every Telegram message crosses, the transcript it writes, and the replies it carries back to waiting tasks. |
 | `packages/web` | The Next.js dashboard: the shell its pages land in, and the HTTP client it reads them through. Lint refuses a database import here — the API is the only door. |
 | `fixtures` | Local fixture sites the engines are tested against. |
