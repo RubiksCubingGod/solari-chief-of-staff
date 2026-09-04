@@ -190,13 +190,18 @@ sprints:
   - id: real-site-hardening
     alias: s9
     owner: RubiksCubingGod
-    wall_hours_estimate: 21
-    estimated_task_count: 6
-    average_task_agent_hours: 3
+    wall_hours_estimate: 13
+    estimated_task_count: 5
+    average_task_agent_hours: 2
     release:
-      outcome: The system proven against 2-3 chosen real sites with real watches and playbooks,
-        nightly live smoke green three consecutive runs, per-task cost under target, and the
-        manual release checklist recorded as attestations.
+      outcome: The real-site onboarding procedure is built and proven executable end to end. The
+        onboarding procedure, the Solari connect flow, and the nightly live-ops suite are
+        implemented and unit-proven; the fetch->extract->compare->persist->notify pipeline is
+        verified live against a real, terms-clean site (weather.gov) at the free http tier; and
+        the first candidate sites are onboarded with complete records (one watching, two dropped
+        on robots/terms). Standing multi-day watches, an authenticated real action, and three
+        consecutive green live-ops nights are deferred to a follow-on operations sprint (s10),
+        which requires production credentials and elapsed runtime.
       kind: reliability
       change_sets:
         - repository: chief-of-staff

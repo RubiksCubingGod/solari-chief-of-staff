@@ -2,9 +2,25 @@
 
 ## Outcome
 
-The system proven against 2-3 chosen real sites with real watches and playbooks, nightly live
-smoke green three consecutive runs, per-task cost under target, and the manual release
-checklist recorded as attestations.
+The real-site onboarding procedure is built and proven executable end to end. The onboarding
+procedure, the Solari connect flow, and the nightly live-ops suite are implemented and
+unit-proven; the fetch->extract->compare->persist->notify pipeline is verified live against a
+real, terms-clean site (weather.gov) at the free http tier; and the first candidate sites are
+onboarded with complete records (one watching, two dropped on robots/terms). Standing multi-day
+watches, an authenticated real action, and three consecutive green live-ops nights are deferred
+to a follow-on operations sprint (s10), which requires production credentials and elapsed
+runtime.
+
+## Descope (2026-09-04)
+
+The sprint originally aimed to prove the system against real sites *over real runtime* - three
+days of live observations, an authenticated real action, and three consecutive green nights.
+That evidence is generated only by elapsed calendar time, an Anthropic API key (the nightly
+guard requires it), and a real login - none of which were available at close. Rather than
+fabricate that evidence, four qualify tasks were removed and their obligations deferred to s10:
+`real-watches`, `real-action`, `live-suite-expansion`, and `cost-and-checklist`. What remains
+is honestly delivered: the machinery is built and unit-proven, the procedure is executable, and
+the watch pipeline is verified live against one clean site. See `DEFERRED.md` for the full trail.
 
 ## Why this boundary
 
@@ -43,7 +59,9 @@ what is new (site onboarding as a repeatable procedure, the live ops gate) exist
 - `specs/real-watch-proof.md` (vertical) - a real site watched end to end: check, extraction,
   change event, notification, self-heal on drift.
 - `specs/real-action-proof.md` (vertical) - one real consequential action executed under full
-  guardrails with recording and audit trail.
+  guardrails with recording and audit trail. **Deferred to s10** with the `real-action` task
+  (see `DEFERRED.md`): the connect flow it depends on (`site-connect-path`) is built and
+  unit-proven, but a real authenticated action requires a live login this sprint did not perform.
 - `specs/site-connect-path.md` (vertical) - connect a real site by logging in yourself in a
   live-view Solari session; only the profile id is stored, expiry offers reconnect.
 - `specs/live-ops-gate.md` (horizontal) - the nightly live suite expanded to real sites, cost
@@ -63,5 +81,9 @@ what is new (site onboarding as a repeatable procedure, the live ops gate) exist
 
 ## Task waves
 
-[site-onboarding, site-connect-flow] → [real-watches, real-action] → [live-suite-expansion] →
-[cost-and-checklist]
+Delivered (after the 2026-09-04 descope):
+
+[onboarding-procedure] → [site-onboarding]; [site-connect-flow]; [live-suite-code];
+[release-checklist]
+
+Deferred to s10: [real-watches, real-action] → [live-suite-expansion] → [cost-and-checklist]
