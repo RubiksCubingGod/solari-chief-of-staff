@@ -33,6 +33,8 @@ if that had been done.
 | A software vendor's pricing page | `digest` | `http` | static, cheap, changes rarely; proves the change watch and costs nothing | a change may never come during the trial window |
 | A second-hand marketplace search for one item | `price` | `browser` or `stealth` | the most useful watch to a real person | the terms of most marketplaces forbid automated reading; expected to fail step 1 |
 | An online travel agency's flight search results page | `price` | `browser` or `stealth` | a fare the person is actually waiting on; a real drop is worth a notification | **failed step 1 on 2026-09-03**: www.expedia.com's robots file disallows `/Flights-Search` under `User-agent: *` (`records/www.expedia.com.md`); orbitz.com and travelocity.com carry the same rule, and the legal pages answer 429 to a plain fetch |
+| A gym club page with a live class schedule | `slots` or `digest` | `http` | server-rendered spot counts that move through the day; free tier | **failed step 1 on 2026-09-03**: robots allows the path but www.goldsgym.com's Terms & Conditions forbid automated monitoring (`records/www.goldsgym.com.md`) |
+| A National Weather Service point-forecast page | `price` or `digest` | `http` | **onboarded and watching on 2026-09-03** (`records/forecast.weather.gov.md`): public-domain, robots-clean, terms-clean, server-rendered, $0 at the free tier; both a numeric temperature threshold and a conditions-change digest verified live | the value moves on the weather's schedule, so a threshold trigger can take days to fire |
 
 ## How to use this file
 
