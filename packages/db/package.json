@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Drizzle schema, migrations, the shared Postgres client, and the pg-boss job harness.",
+  "description": "Drizzle schema, migrations, the shared Postgres client, the pg-boss job harness, and the persisted task state machine that rides it.",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -26,6 +26,7 @@
   "devDependencies": {
     "@testcontainers/postgresql": "12.1.0",
     "@types/pg": "^8.23.1",
-    "drizzle-kit": "0.31.10"
+    "drizzle-kit": "0.31.10",
+    "embedded-postgres": "17.10.0-beta.17"
   }
 }

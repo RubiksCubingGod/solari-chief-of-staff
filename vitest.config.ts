@@ -1,3 +1,4 @@
+import { availableParallelism } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 import { defineConfig } from 'vitest/config';
@@ -7,6 +8,7 @@ const WORKSPACE_PACKAGES = [
   'db',
   'solari',
   'agent',
+  'watch',
   'playbooks',
   'api',
   'bot',
@@ -27,6 +29,18 @@ const sourceAliases = {
    */
   '@chief-of-staff/db/testing': fileURLToPath(
     new URL('./packages/db/src/testing/postgres.ts', import.meta.url),
+  ),
+  /**
+   * The dashboard's guard test drives a browser through the whole magic-link
+   * flow, so it needs a real API on a real database - and it may not build one,
+   * because `eslint.config.js` keeps `packages/web` away from the schema. The
+   * API package builds the fixture instead and hands over a URL. Source-only
+   * and excluded from that package's build, so like the db helper above it is
+   * aliased explicitly and listed before the bare package alias, which would
+   * otherwise swallow the subpath.
+   */
+  '@chief-of-staff/api/testing': fileURLToPath(
+    new URL('./packages/api/src/testing/auth-stack.ts', import.meta.url),
   ),
   /**
    * The fixture sites live outside `packages/`, so they are aliased explicitly
@@ -62,12 +76,31 @@ export const coverageThresholds = {
   },
 };
 
+/**
+ * How many test files may be in flight at once.
+ *
+ * Fewer than there are cores, on purpose. What bounds this run is memory rather
+ * than CPU: an integration file here can be a Postgres container, or a Next dev
+ * server compiling a route with a Chromium beside it, and there are enough of
+ * both that one process per core asks for more memory than a developer
+ * workstation running an editor and a browser has left. Oversubscribed, the
+ * failures do not look like memory - they look like a container that took more
+ * than two minutes to accept connections and an ESLint run that took three,
+ * which is to say like flakes in whichever suites happened to be scheduled
+ * together.
+ *
+ * Capped rather than fixed, so a smaller machine still gets one process per
+ * core and does not end up with eight of them fighting over four.
+ */
+const MAX_CONCURRENT_TEST_FILES = Math.min(8, availableParallelism());
+
 const TEST_FILE_GLOBS = ['**/*.test.ts', '**/*.integration.test.ts'];
 const ALWAYS_EXCLUDED = ['**/node_modules/**', '**/dist/**', '**/coverage/**'];
 
 export default defineConfig({
   resolve: { alias: sourceAliases },
   test: {
+    maxWorkers: MAX_CONCURRENT_TEST_FILES,
     projects: [
       {
         extends: true,
@@ -98,10 +131,14 @@ export default defineConfig({
       include: ['packages/*/src/**/*.ts'],
       exclude: [
         ...TEST_FILE_GLOBS,
-        // The only file that needs a container runtime. It cannot run on a
+        // The two ends of the test-database ladder, each of which only one kind
+        // of machine executes. The container adapter cannot run on a
         // workstation without Docker, and on CI it is the path every
-        // integration test already takes.
+        // integration test already takes; the embedded cluster is the exact
+        // opposite, reached only where no container runtime answered. Their
+        // selection logic lives in `postgres.ts`, which is covered.
         'packages/db/src/testing/testcontainers.ts',
+        'packages/db/src/testing/embedded.ts',
       ],
       thresholds: coverageThresholds,
     },

@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Per-site deterministic scripted flows.",
+  "description": "Per-site deterministic scripted flows, and the guardrails every one of them runs inside.",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -15,5 +15,16 @@
   ],
   "scripts": {
     "build": "tsc --build"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.122.0",
+    "@chief-of-staff/core": "workspace:*",
+    "@chief-of-staff/db": "workspace:*",
+    "@chief-of-staff/solari": "workspace:*",
+    "playwright": "1.62.1",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@chief-of-staff/fixtures": "workspace:*"
   }
 }

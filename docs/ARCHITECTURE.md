@@ -308,6 +308,15 @@ live-smoke tier.
 - `push`: lint (eslint + tsc), unit + integration, coverage gate (100% on
   `core/`, ≥90% overall), build.
 - `nightly`: agent evals + live smoke (secrets-gated), cost report artifact.
+- `live-ops` (nightly, secrets-gated): the release gate's night. `scripts/live-ops.mjs`
+  runs one case per class - session lifecycle, real-site watch checks, one
+  fixture mission, the live evals - and reports each as passed, failed or
+  errored, never merged; sums Solari and Anthropic cost against
+  `LIVE_OPS_COST_TARGET_USD`; judges the night (`packages/watch/src/live-ops/`);
+  and sends a night that is not green to `OPS_USER_ID` through `sendToUser`.
+  The release wants three consecutive green nights; one errored night is
+  skipped, two in a row break the run. The record is an artifact a person
+  copies into `docs/RELEASE-CHECKLIST.md`, never a file the job commits.
 - PR template carries the manual-checklist stub.
 
 ---

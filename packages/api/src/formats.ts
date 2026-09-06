@@ -55,9 +55,52 @@ export function isIsoDate(value: string): boolean {
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().startsWith(value);
 }
 
+const ISO_INSTANT =
+  /^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/u;
+
+/**
+ * An instant, spelled the way `Date#toISOString` spells one. Observation
+ * series are bounded against a `timestamptz`, so a bound written as a bare
+ * calendar day would begin at a different moment for every caller; demanding
+ * the zone makes the window the client asked for the window the database
+ * compares against.
+ *
+ * It is not registered as `iso-date-time`, which would read better: Fastify
+ * compiles schemas through ajv-formats, whose own `iso-date-time` makes the
+ * zone optional and silently wins over a format of that name declared here.
+ */
+export function isIsoInstant(value: string): boolean {
+  // The calendar part is held to the same rule a `date` column is, because
+  // `Date` rolls the 30th of February forward into March rather than refusing
+  // it, and a bound nobody wrote is worse than a bound that was refused.
+  return ISO_INSTANT.test(value) && isIsoDate(value.slice(0, 10));
+}
+
+/**
+ * The most observations one series request may return. A sparkline draws a few
+ * hundred points at most, and without a ceiling one request could walk a
+ * watch's entire history out of the database and into a browser.
+ */
+export const MAX_OBSERVATION_LIMIT = 500;
+
+const POSITIVE_COUNT = /^[1-9]\d{0,4}$/u;
+
+/**
+ * Fastify hands query values to Ajv as strings and this server does not coerce
+ * types, so the ceiling has to be checked against the string the client
+ * actually sent. Checking it here rather than in the handler is what makes
+ * `limit=5000` and `limit=lots` the same refusal naming the same field,
+ * instead of one being a 400 and the other a quiet clamp nobody asked for.
+ */
+export function isObservationLimit(value: string): boolean {
+  return POSITIVE_COUNT.test(value) && Number(value) <= MAX_OBSERVATION_LIMIT;
+}
+
 export const AJV_FORMATS: Readonly<Record<string, (value: string) => boolean>> = {
   'cron-expression': isCronExpression,
   'http-url': isHttpUrl,
   'iso-date': isIsoDate,
+  'iso-instant': isIsoInstant,
+  'observation-limit': isObservationLimit,
   uuid: isUuid,
 };

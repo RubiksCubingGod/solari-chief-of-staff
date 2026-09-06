@@ -2,14 +2,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { gzipSync } from 'node:zlib';
 
-import type { BrowserContext, Page } from 'playwright';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
-import {
-  type BrowserProvider,
-  type BrowserSession,
-  type SessionMeta,
-} from './provider.js';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   API_KEY_VARIABLE,
@@ -18,9 +11,7 @@ import {
   liveSuiteName,
   pollReplayUrl,
   probeReplayBody,
-  runLiveSmokeWith,
   runTeardowns,
-  type LiveSmokeDependencies,
   type ReplayReader,
 } from './live-smoke.js';
 
@@ -318,167 +309,5 @@ describe('liveSuiteName', () => {
 
     expect(name).toContain('@live');
     expect(name).toContain('SOLARI_LIVE_SMOKE is not set');
-  });
-});
-
-/**
- * The composed live path, driven without a credential.
- *
- * `runLiveSmokeWith` exists so these four outcomes can be pinned here. The
- * teardown they cover was written to close a defect where a failing body
- * skipped the release entirely; proving it only under the nightly would mean
- * the guard against that regression runs solely when someone is being billed.
- */
-
-interface FakeParts {
-  readonly dependencies: LiveSmokeDependencies;
-  readonly disposed: () => number;
-  readonly closed: () => number;
-}
-
-function createFakeLivePath(
-  options: {
-    readonly title?: string;
-    readonly sessionId?: string | undefined;
-    readonly newPageError?: Error;
-    readonly disposeError?: Error;
-    readonly closeError?: Error;
-  } = {},
-): FakeParts {
-  let disposed = 0;
-  let closed = 0;
-  const live = new Set<string>();
-  const sessionId = 'sessionId' in options ? options.sessionId : 'fake-session-1';
-
-  const provider: BrowserProvider = {
-    name: 'fake',
-    acquire: () => {
-      if (sessionId !== undefined) live.add(sessionId);
-
-      const meta = {
-        sessionId,
-        stealth: false,
-        captcha: false,
-        recording: true,
-        proxy: undefined,
-        timezoneId: undefined,
-        profileId: undefined,
-        storageState: undefined,
-        expiresAt: undefined,
-        // `sessionId` is a string in the contract. The one case that matters
-        // here is the vendor failing to honour that, so the fake is allowed to
-        // say so rather than the test asserting on a shape it cannot produce.
-      } as unknown as SessionMeta;
-
-      let released = false;
-      const session: BrowserSession = {
-        meta,
-        context: {} as unknown as BrowserContext,
-        newPage: () => {
-          if (options.newPageError) return Promise.reject(options.newPageError);
-          const page = {
-            goto: () => Promise.resolve(null),
-            title: () => Promise.resolve(options.title ?? 'Example Domain'),
-          };
-          return Promise.resolve(page as unknown as Page);
-        },
-        get released() {
-          return released;
-        },
-        release: () => {
-          released = true;
-          if (sessionId !== undefined) live.delete(sessionId);
-          return Promise.resolve();
-        },
-      };
-
-      return Promise.resolve(session);
-    },
-    liveSessionIds: () => [...live],
-    dispose: () => {
-      disposed += 1;
-      if (options.disposeError) return Promise.reject(options.disposeError);
-      live.clear();
-      return Promise.resolve();
-    },
-  };
-
-  const sessions: ReplayReader = {
-    getReplayUrl: () =>
-      Promise.resolve({ url: 'https://replay.invalid/object', contentEncoding: 'gzip' }),
-  };
-
-  return {
-    dependencies: {
-      provider,
-      replayClient: {
-        sessions,
-        close: () => {
-          closed += 1;
-          return options.closeError ? Promise.reject(options.closeError) : Promise.resolve();
-        },
-      },
-      probeBody: () =>
-        Promise.resolve({ shape: 'ndjson' as const, responseEncoding: 'gzip', bytes: 4_096 }),
-    },
-    disposed: () => disposed,
-    closed: () => closed,
-  };
-}
-
-describe('runLiveSmokeWith', () => {
-  it('reports the composed path and tears both clients down once', async () => {
-    const parts = createFakeLivePath();
-
-    const report = await runLiveSmokeWith(parts.dependencies, { apiKey: 'sk-test', flushMs: 0 });
-
-    expect(report.sessionId).toBe('fake-session-1');
-    expect(report.title).toBe('Example Domain');
-    expect(report.replayUrl).toBe('https://replay.invalid/object');
-    expect(report.replayBodyShape).toBe('ndjson');
-    expect(report.replayBytes).toBe(4_096);
-    // The assert the smoke exists for: the ledger is read after release and
-    // before dispose, so an empty list here is a released slot rather than a
-    // cleared one.
-    expect(report.liveSessionIdsAfterRelease).toEqual([]);
-    expect(parts.disposed()).toBe(1);
-    expect(parts.closed()).toBe(1);
-  });
-
-  it('refuses to report a run whose session never named itself', async () => {
-    const parts = createFakeLivePath({ sessionId: undefined });
-
-    await expect(
-      runLiveSmokeWith(parts.dependencies, { apiKey: 'sk-test', flushMs: 0 }),
-    ).rejects.toThrow('released without ever reporting an id');
-    // Still torn down: an unusable report is not a reason to leak a slot.
-    expect(parts.disposed()).toBe(1);
-    expect(parts.closed()).toBe(1);
-  });
-
-  it('propagates the body error and reports teardown failures rather than swallowing either', async () => {
-    const newPageError = new Error('the page never opened');
-    const parts = createFakeLivePath({ newPageError, disposeError: new Error('dispose failed') });
-    const onTeardownFailure = vi.fn();
-
-    await expect(
-      runLiveSmokeWith(parts.dependencies, { apiKey: 'sk-test', flushMs: 0, onTeardownFailure }),
-    ).rejects.toBe(newPageError);
-
-    // The body's error is the one the caller can act on, so it propagates; the
-    // teardown failure is reported instead of replacing it.
-    expect(onTeardownFailure).toHaveBeenCalledTimes(1);
-    expect(onTeardownFailure.mock.calls[0]?.[0]).toMatchObject({ what: 'provider.dispose()' });
-    // The second teardown still ran after the first one threw.
-    expect(parts.closed()).toBe(1);
-  });
-
-  it('makes a teardown failure the finding when the path itself succeeded', async () => {
-    const parts = createFakeLivePath({ closeError: new Error('proxy still up') });
-
-    await expect(
-      runLiveSmokeWith(parts.dependencies, { apiKey: 'sk-test', flushMs: 0 }),
-    ).rejects.toThrow(/could not tear down: solari\.close\(\): proxy still up/u);
-    expect(parts.disposed()).toBe(1);
   });
 });

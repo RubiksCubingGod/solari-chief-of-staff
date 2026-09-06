@@ -1,5 +1,42 @@
-export { createApp } from './app.js';
-export { CALLER_HEADER } from './caller.js';
+export { DEFAULT_CONNECT_TIMEOUT_MS, createApp, type AppOptions, type ConnectSupport } from './app.js';
+export {
+  createConnectAttemptLedger,
+  profileNameFor,
+  type ConnectAttempt,
+  type ConnectAttemptLedger,
+  type ConnectAttemptLedgerOptions,
+  type ConnectAttemptStatus,
+} from './connect-attempts.js';
+export {
+  MailerNotConfiguredError,
+  createMailer,
+  createRecordingMailer,
+  createUnconfiguredMailer,
+  type MagicLinkMail,
+  type MailerPort,
+  type RecordingMailer,
+} from './auth/mailer.js';
+export {
+  DEFAULT_DASHBOARD_BASE_URL,
+  LOGIN_TOKEN_TTL_MS,
+  SESSION_COOKIE_NAME,
+  SESSION_TTL_MS,
+  clearedSessionCookieHeader,
+  loadAuthConfig,
+  mintSessionCookie,
+  readCookie,
+  sessionCookieHeader,
+  signSession,
+  verifySessionToken,
+  type AuthConfig,
+} from './auth/session.js';
+export {
+  consumeLoginToken,
+  digestLoginToken,
+  generateLoginToken,
+  issueLoginToken,
+  type IssuedLoginToken,
+} from './auth/tokens.js';
 export {
   ConfigError,
   LOG_LEVELS,
@@ -20,5 +57,13 @@ export {
   type ErrorEnvelope,
   type SchemaViolation,
 } from './errors.js';
-export { isCronExpression, isHttpUrl, isIsoDate, isUuid } from './formats.js';
+export {
+  MAX_OBSERVATION_LIMIT,
+  isCronExpression,
+  isHttpUrl,
+  isIsoDate,
+  isIsoInstant,
+  isObservationLimit,
+  isUuid,
+} from './formats.js';
 export { startServer, type RunningServer } from './server.js';

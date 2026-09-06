@@ -9,6 +9,19 @@
   ],
   "exclude": [
     "src/**/*.test.ts",
-    "src/**/*.integration.test.ts"
+    "src/**/*.integration.test.ts",
+    "src/**/testing/**",
+    "src/**/eval/**"
+  ],
+  "references": [
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../db"
+    },
+    {
+      "path": "../solari"
+    }
   ]
 }

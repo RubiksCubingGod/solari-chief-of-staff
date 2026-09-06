@@ -23,6 +23,7 @@ import { describe, expect, it } from 'vitest';
  */
 
 const SOURCE_ROOTS = ['packages', 'fixtures', 'scripts', 'tests'];
+const BUILD_OUTPUT = new Set(['node_modules', 'dist', '.next']);
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
 
 /** The single module allowed to import the vendor SDK, relative to the repository root. */
@@ -32,9 +33,14 @@ function sourceFiles(directory: string, found: string[] = []): string[] {
   for (const entry of readdirSync(join(repositoryRoot, directory), { withFileTypes: true })) {
     const path = `${directory}/${entry.name}`;
     if (entry.isDirectory()) {
-      // `dist` is emitted from these same sources and `node_modules` is the
-      // vendor SDK itself; neither is workspace code that could open a door.
-      if (entry.name === 'node_modules' || entry.name === 'dist') continue;
+      // `dist` and `.next` are emitted from these same sources and
+      // `node_modules` is the vendor SDK itself; none of it is workspace code
+      // that could open a door. `.next` has to be skipped rather than merely
+      // ignored: the dashboard's e2e suites each build into their own
+      // `.next/instance-<uuid>` and delete it on the way out, so a scan that
+      // walks in there is reading a directory that is being removed underneath
+      // it, and fails with ENOENT on a file nobody wrote.
+      if (BUILD_OUTPUT.has(entry.name)) continue;
       sourceFiles(path, found);
     } else if (entry.name.endsWith('.ts') || entry.name.endsWith('.mjs')) {
       found.push(path);

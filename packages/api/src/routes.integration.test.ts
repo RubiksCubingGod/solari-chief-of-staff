@@ -1,11 +1,19 @@
 import { randomUUID } from 'node:crypto';
 
-import { runMigrations, tasks, users, watches, calendarItems } from '@chief-of-staff/db';
+import {
+  observations,
+  runMigrations,
+  tasks,
+  users,
+  watches,
+  calendarItems,
+} from '@chief-of-staff/db';
 import { startTestPostgres, type TestPostgres } from '@chief-of-staff/db/testing';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createApp } from './app.js';
+import { mintSessionCookie } from './auth/session.js';
 
 let postgres: TestPostgres;
 let app: FastifyInstance;
@@ -21,7 +29,11 @@ async function createUser(telegramChatId: string): Promise<string> {
 beforeAll(async () => {
   postgres = await startTestPostgres();
   await runMigrations(postgres.connectionString);
-  app = createApp({ DATABASE_URL: postgres.connectionString, LOG_LEVEL: 'silent' });
+  app = createApp({
+    DATABASE_URL: postgres.connectionString,
+    LOG_LEVEL: 'silent',
+    SESSION_SECRET,
+  });
   await app.ready();
   ownerId = await createUser('owner');
   strangerId = await createUser('stranger');
@@ -43,9 +55,24 @@ beforeEach(async () => {
   await app.db.delete(tasks);
 });
 
-/** The headers of a request from the user every test acts as. */
+/**
+ * The secret this server signs sessions with, fixed so the tests below can mint
+ * one the server will accept. Nothing outside a test may do this: minting a
+ * session without consuming a link is what the magic-link flow exists to
+ * prevent, and it is only available here because this file configured the key.
+ */
+const SESSION_SECRET = 'the-secret-this-suite-configured';
+
+/**
+ * The headers of a request from the user every test acts as.
+ *
+ * This used to be an `x-user-id` header. It is a session cookie now, because a
+ * header naming a user is a header any caller can write - see the note in
+ * `caller.ts`. The seam is the only thing that moved: not one route schema and
+ * not one assertion below it changed.
+ */
 function asOwner(): Record<string, string> {
-  return { 'x-user-id': ownerId };
+  return { cookie: mintSessionCookie(ownerId, SESSION_SECRET) };
 }
 
 const A_WATCH = {
@@ -62,6 +89,24 @@ function paths(body: string): string[] {
 
 function code(body: string): string {
   return (JSON.parse(body) as { error: { code: string } }).error.code;
+}
+
+async function createWatchFor(userId: string): Promise<string> {
+  const [created] = await app.db
+    .insert(watches)
+    .values({ ...A_WATCH, userId, extractor: {} })
+    .returning();
+  if (created === undefined) throw new Error('the fixture watch was not created');
+  return created.id;
+}
+
+/**
+ * A refusal with the row id taken out of it, so the answer to a stranger's row
+ * and the answer to a row that never existed can be compared character for
+ * character without pinning the wording either of them uses.
+ */
+function withoutId(body: string, id: string): string {
+  return body.replaceAll(id, '{id}');
 }
 
 describe('POST /watches', () => {
@@ -125,38 +170,38 @@ describe('POST /watches', () => {
     await expect(app.db.select().from(watches)).resolves.toEqual([]);
   });
 
-  it('refuses a caller that does not exist and one that is not an id at all', async () => {
+  it('refuses a session for nobody, a garbage one, and no session at all', async () => {
+    // Signed by this server, for a user who does not exist. The signature is
+    // real and the account is not, and the row is the authority.
     const unknown = await app.inject({
       method: 'POST',
       url: '/watches',
-      headers: { 'x-user-id': randomUUID() },
+      headers: { cookie: mintSessionCookie(randomUUID(), SESSION_SECRET) },
       payload: A_WATCH,
     });
-    expect(unknown.statusCode).toBe(404);
-    expect(code(unknown.body)).toBe('not_found');
+    expect(unknown.statusCode).toBe(401);
+    expect(code(unknown.body)).toBe('unauthorized');
 
+    // Not a session at all. A 401 rather than a 400: a browser holding a stale
+    // cookie has not sent a malformed request, it has simply not signed in.
     const malformed = await app.inject({
       method: 'GET',
       url: '/watches',
-      headers: { 'x-user-id': 'me' },
+      headers: { cookie: 'cos_session=me' },
     });
-    expect(malformed.statusCode).toBe(400);
-    expect(code(malformed.body)).toBe('validation_failed');
+    expect(malformed.statusCode).toBe(401);
+    expect(code(malformed.body)).toBe('unauthorized');
+
+    // And nothing at all, which is what every first visit looks like.
+    const anonymous = await app.inject({ method: 'GET', url: '/watches' });
+    expect(anonymous.statusCode).toBe(401);
+    expect(code(anonymous.body)).toBe('unauthorized');
 
     await expect(app.db.select().from(watches)).resolves.toEqual([]);
   });
 });
 
 describe('PATCH /watches/:id', () => {
-  async function createWatchFor(userId: string): Promise<string> {
-    const [created] = await app.db
-      .insert(watches)
-      .values({ ...A_WATCH, userId, extractor: {} })
-      .returning();
-    if (created === undefined) throw new Error('the fixture watch was not created');
-    return created.id;
-  }
-
   it('pauses and resumes a watch the caller owns', async () => {
     const id = await createWatchFor(ownerId);
 
@@ -297,6 +342,155 @@ describe('calendar items', () => {
 
     await expect(app.db.select().from(calendarItems)).resolves.toEqual([]);
   });
+
+  it('takes the reminder lead and the auto-cancel settings, and defaults them when absent', async () => {
+    const flagged = await app.inject({
+      method: 'POST',
+      url: '/calendar-items',
+      headers: asOwner(),
+      payload: {
+        ...A_SUBSCRIPTION,
+        reminderLeadDays: 7,
+        autoCancel: true,
+        autoCancelLeadDays: 5,
+        action: { site: 'fakegym' },
+      },
+    });
+    expect(flagged.statusCode).toBe(201);
+    expect(flagged.json()).toMatchObject({
+      reminderLeadDays: 7,
+      autoCancel: true,
+      autoCancelLeadDays: 5,
+      action: { site: 'fakegym' },
+    });
+
+    const plain = await app.inject({
+      method: 'POST',
+      url: '/calendar-items',
+      headers: asOwner(),
+      payload: A_SUBSCRIPTION,
+    });
+    expect(plain.statusCode).toBe(201);
+    // The schema's defaults, which are what the scan reads: three days'
+    // notice, and nothing cancelled that the person did not flag.
+    expect(plain.json()).toMatchObject({
+      reminderLeadDays: 3,
+      autoCancel: false,
+      autoCancelLeadDays: 3,
+    });
+  });
+
+  it('refuses auto-cancel on a deadline, and a lead that is not a count of days', async () => {
+    for (const payload of [
+      { kind: 'deadline', name: 'Amend the return', cancelBy: '2026-10-15', autoCancel: true },
+      { ...A_SUBSCRIPTION, reminderLeadDays: -1 },
+      { ...A_SUBSCRIPTION, reminderLeadDays: 1.5 },
+      { ...A_SUBSCRIPTION, autoCancelLeadDays: 366 },
+      { ...A_SUBSCRIPTION, autoCancel: 'yes' },
+    ]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/calendar-items',
+        headers: asOwner(),
+        payload,
+      });
+      expect(response.statusCode, JSON.stringify(payload)).toBe(400);
+      expect(code(response.body)).toBe('validation_failed');
+    }
+
+    await expect(app.db.select().from(calendarItems)).resolves.toEqual([]);
+  });
+});
+
+describe('POST /tasks', () => {
+  it('queues a task the chat loop asked for and reads it back through the list', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/tasks',
+      headers: asOwner(),
+      payload: { kind: 'cancel', input: { what: 'gym', connection: 'fakegym' } },
+    });
+
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({
+      userId: ownerId,
+      kind: 'cancel',
+      input: { what: 'gym', connection: 'fakegym' },
+      // Queued and nothing more: this sprint has no engine, and the row is the
+      // whole of what "I have queued that" is allowed to mean.
+      status: 'queued',
+      // ARCHITECTURE 3.2 tries a playbook before an agentic run, so a caller
+      // that does not say gets the cheaper of the two rather than the general
+      // one.
+      mode: 'playbook',
+      playbookId: null,
+      solariSessionId: null,
+      recordingUrl: null,
+      result: null,
+      llmUsage: null,
+      finishedAt: null,
+    });
+
+    const listed = await app.inject({ method: 'GET', url: '/tasks', headers: asOwner() });
+    expect(listed.json()).toEqual([created.json()]);
+  });
+
+  it('takes an explicit mode when the caller has one', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/tasks',
+      headers: asOwner(),
+      payload: { kind: 'custom', input: {}, mode: 'agentic' },
+    });
+
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({ mode: 'agentic' });
+  });
+
+  it('refuses every bad field at once and stores nothing', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/tasks',
+      headers: asOwner(),
+      payload: { kind: 'evict', input: 'the gym', mode: 'vibes' },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(code(response.body)).toBe('validation_failed');
+    expect(paths(response.body)).toEqual(['/input', '/kind', '/mode']);
+    await expect(app.db.select().from(tasks)).resolves.toEqual([]);
+  });
+
+  it('refuses a status the caller tried to set rather than silently dropping it', async () => {
+    // The engine owns every status after `queued`. A body that could name one
+    // would let chat mark its own work done.
+    const response = await app.inject({
+      method: 'POST',
+      url: '/tasks',
+      headers: asOwner(),
+      payload: { kind: 'cancel', input: {}, status: 'succeeded' },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(code(response.body)).toBe('validation_failed');
+    await expect(app.db.select().from(tasks)).resolves.toEqual([]);
+  });
+
+  it('refuses an unknown caller before it writes a row', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/tasks',
+      headers: { cookie: mintSessionCookie(randomUUID(), SESSION_SECRET) },
+      payload: { kind: 'cancel', input: {} },
+    });
+
+    // The refusal has to be the caller check rather than a missing route. It
+    // used to answer 404 for both, and naming the header was the only way to
+    // tell them apart; a session that names nobody is now its own status.
+    expect(response.statusCode).toBe(401);
+    expect(code(response.body)).toBe('unauthorized');
+    await expect(app.db.select().from(tasks)).resolves.toEqual([]);
+  });
 });
 
 describe('GET /tasks', () => {
@@ -332,5 +526,259 @@ describe('GET /tasks', () => {
       newer?.id,
       older?.id,
     ]);
+  });
+});
+
+describe('GET /watches/:id/observations', () => {
+  // Five checks a day apart. The window every bounded test asks for opens on
+  // the second and closes on the fourth, so one observation sits on each edge
+  // and one sits outside each edge.
+  const CHECKED_AT = [
+    '2026-08-01T00:00:00.000Z',
+    '2026-08-02T00:00:00.000Z',
+    '2026-08-03T00:00:00.000Z',
+    '2026-08-04T00:00:00.000Z',
+    '2026-08-05T00:00:00.000Z',
+  ] as const;
+
+  async function seedSeries(watchId: string): Promise<void> {
+    await app.db.insert(observations).values(
+      CHECKED_AT.map((at, index) => ({
+        watchId,
+        checkedAt: new Date(at),
+        tierUsed: 'http' as const,
+        value: { cents: 4900 + index },
+        triggered: index === CHECKED_AT.length - 1,
+      })),
+    );
+  }
+
+  function series(body: string): string[] {
+    return (JSON.parse(body) as { checkedAt: string }[]).map((row) => row.checkedAt);
+  }
+
+  it('returns the whole series oldest first, with everything a sparkline draws', async () => {
+    const id = await createWatchFor(ownerId);
+    await seedSeries(id);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/watches/${id}/observations`,
+      headers: asOwner(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(series(response.body)).toEqual([...CHECKED_AT]);
+    // The row carries the value, the tier and the trigger flag, so the page
+    // draws the point, the marker and the failure state without asking again.
+    expect(response.json<Record<string, unknown>[]>()[0]).toMatchObject({
+      watchId: id,
+      checkedAt: CHECKED_AT[0],
+      tierUsed: 'http',
+      value: { cents: 4900 },
+      triggered: false,
+      error: null,
+    });
+  });
+
+  it('returns only the observations inside the half-open window', async () => {
+    const id = await createWatchFor(ownerId);
+    await seedSeries(id);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/watches/${id}/observations?from=${CHECKED_AT[1]}&to=${CHECKED_AT[3]}`,
+      headers: asOwner(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    // `from` is inclusive and `to` is exclusive, so the observation on the
+    // opening edge is in the window and the one on the closing edge is not.
+    expect(series(response.body)).toEqual([CHECKED_AT[1], CHECKED_AT[2]]);
+  });
+
+  it('keeps the newest observations when the series is longer than the limit', async () => {
+    const id = await createWatchFor(ownerId);
+    await seedSeries(id);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/watches/${id}/observations?limit=2`,
+      headers: asOwner(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(series(response.body)).toEqual([CHECKED_AT[3], CHECKED_AT[4]]);
+  });
+
+  it('answers a watch that has never been checked with an empty series', async () => {
+    const id = await createWatchFor(ownerId);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/watches/${id}/observations`,
+      headers: asOwner(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([]);
+  });
+
+  it('refuses another user’s watch exactly as it refuses one that never existed', async () => {
+    const strangerWatchId = await createWatchFor(strangerId);
+    await seedSeries(strangerWatchId);
+    const unknownId = randomUUID();
+
+    const stranger = await app.inject({
+      method: 'GET',
+      url: `/watches/${strangerWatchId}/observations`,
+      headers: asOwner(),
+    });
+    const unknown = await app.inject({
+      method: 'GET',
+      url: `/watches/${unknownId}/observations`,
+      headers: asOwner(),
+    });
+
+    expect(stranger.statusCode).toBe(404);
+    expect(code(stranger.body)).toBe('not_found');
+    expect(unknown.statusCode).toBe(404);
+    expect(code(unknown.body)).toBe('not_found');
+    // Nothing in either answer tells the caller which of the two it hit.
+    expect(withoutId(stranger.body, strangerWatchId)).toBe(withoutId(unknown.body, unknownId));
+  });
+
+  it('refuses a bound it cannot read, a limit past the ceiling, and an unknown parameter', async () => {
+    const id = await createWatchFor(ownerId);
+
+    for (const query of [
+      // A calendar day is not an instant: the window would start at a different
+      // moment for every caller's zone.
+      'from=2026-08-02',
+      'from=yesterday',
+      'to=2026-08-04T00:00:00',
+      'limit=0',
+      'limit=abc',
+      'limit=-1',
+      'limit=501',
+      // A misspelled bound is a wider window than the caller asked for, so it
+      // is refused rather than dropped.
+      'since=2026-08-02T00:00:00.000Z',
+    ]) {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/watches/${id}/observations?${query}`,
+        headers: asOwner(),
+      });
+      expect(response.statusCode, query).toBe(400);
+      expect(code(response.body), query).toBe('validation_failed');
+    }
+  });
+
+  it('refuses a window that ends before it starts rather than answering nothing', async () => {
+    const id = await createWatchFor(ownerId);
+    await seedSeries(id);
+
+    for (const query of [
+      `from=${CHECKED_AT[3]}&to=${CHECKED_AT[1]}`,
+      `from=${CHECKED_AT[1]}&to=${CHECKED_AT[1]}`,
+    ]) {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/watches/${id}/observations?${query}`,
+        headers: asOwner(),
+      });
+      expect(response.statusCode, query).toBe(400);
+      expect(code(response.body), query).toBe('bad_request');
+    }
+  });
+
+  it('refuses a watch id that is not a uuid', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/watches/not-a-uuid/observations',
+      headers: asOwner(),
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(code(response.body)).toBe('validation_failed');
+    expect(paths(response.body)).toEqual(['/id']);
+  });
+});
+
+describe('GET /tasks/:id', () => {
+  async function createTaskFor(userId: string): Promise<string> {
+    const [created] = await app.db
+      .insert(tasks)
+      .values({
+        userId,
+        kind: 'cancel',
+        mode: 'playbook',
+        input: { what: 'gym' },
+        status: 'succeeded',
+        playbookId: 'planet-fitness-cancel',
+        result: { cancelled: true },
+        createdAt: new Date('2026-08-01T00:00:00Z'),
+        finishedAt: new Date('2026-08-01T00:04:00Z'),
+      })
+      .returning();
+    if (created === undefined) throw new Error('the fixture task was not created');
+    return created.id;
+  }
+
+  it('returns the whole task row the history shell renders', async () => {
+    const id = await createTaskFor(ownerId);
+
+    const response = await app.inject({ method: 'GET', url: `/tasks/${id}`, headers: asOwner() });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      id,
+      userId: ownerId,
+      kind: 'cancel',
+      mode: 'playbook',
+      status: 'succeeded',
+      input: { what: 'gym' },
+      playbookId: 'planet-fitness-cancel',
+      result: { cancelled: true },
+      createdAt: '2026-08-01T00:00:00.000Z',
+      finishedAt: '2026-08-01T00:04:00.000Z',
+      solariSessionId: null,
+      recordingUrl: null,
+    });
+  });
+
+  it('refuses another user’s task exactly as it refuses one that never existed', async () => {
+    const strangerTaskId = await createTaskFor(strangerId);
+    const unknownId = randomUUID();
+
+    const stranger = await app.inject({
+      method: 'GET',
+      url: `/tasks/${strangerTaskId}`,
+      headers: asOwner(),
+    });
+    const unknown = await app.inject({
+      method: 'GET',
+      url: `/tasks/${unknownId}`,
+      headers: asOwner(),
+    });
+
+    expect(stranger.statusCode).toBe(404);
+    expect(code(stranger.body)).toBe('not_found');
+    expect(unknown.statusCode).toBe(404);
+    expect(code(unknown.body)).toBe('not_found');
+    expect(withoutId(stranger.body, strangerTaskId)).toBe(withoutId(unknown.body, unknownId));
+  });
+
+  it('refuses a task id that is not a uuid', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/tasks/not-a-uuid',
+      headers: asOwner(),
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(code(response.body)).toBe('validation_failed');
+    expect(paths(response.body)).toEqual(['/id']);
   });
 });

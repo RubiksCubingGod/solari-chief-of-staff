@@ -1,3 +1,5 @@
+import { runInNewContext } from 'node:vm';
+
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { startFakenewsFixture } from './fakenews.js';
@@ -42,20 +44,79 @@ function markupSurface(html: string): Record<string, string[]> {
   };
 }
 
+/**
+ * Reads the state marker the way a consumer does - off the meta tag - rather
+ * than by substring-matching the whole document. `blocked` deliberately carries
+ * the normal marker inside the script it hands a JavaScript-executing client,
+ * so a substring check would conflate what the server served with what a script
+ * client ends up holding.
+ */
+function stateMarker(html: string): string | undefined {
+  return /<meta name="fixture-state" content="([^"]+)"/.exec(html)?.[1];
+}
+
+/**
+ * Runs the blocked shell's own injected script against a DOM the *test* owns.
+ *
+ * The script text is the real one the server emitted - only the document it
+ * runs against is a stub, and that stub throws on any selector it was not told
+ * about, so a change to what the shell queries fails here rather than silently
+ * doing nothing. This proves what a JavaScript-executing client ends up
+ * holding; a real browser rendering the same shell is owed by
+ * `browser-substrate` and is recorded in HANDOFF.md.
+ */
+function materialize(html: string): { main: string; state: string } {
+  const script = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1];
+  expect(script, 'the blocked shell must carry a script').toBeDefined();
+
+  const main = { innerHTML: '' };
+  const meta = {
+    content: BLOCKED_SHELL_STATE,
+    setAttribute(name: string, value: string): void {
+      if (name === 'content') {
+        meta.content = value;
+      }
+    },
+  };
+  let ready: (() => void) | undefined;
+  const document = {
+    addEventListener(event: string, handler: () => void): void {
+      if (event === 'DOMContentLoaded') {
+        ready = handler;
+      }
+    },
+    querySelector(selector: string): unknown {
+      if (selector === 'main') {
+        return main;
+      }
+      if (selector === 'meta[name="fixture-state"]') {
+        return meta;
+      }
+      throw new Error(`the blocked shell queried an unmodelled selector: ${selector}`);
+    },
+  };
+
+  runInNewContext(script ?? '', { document, atob });
+  expect(ready, 'the shell must defer to DOMContentLoaded').toBeDefined();
+  ready?.();
+
+  return { main: main.innerHTML, state: meta.content };
+}
+
 describe('blocked mode', () => {
   it('serves a captcha shell to a plain HTTP fetch on the unchanged URL', async () => {
     const store = await startFakestoreFixture();
     try {
       await store.control.setProduct('drill', PRODUCT);
       const normal = await get(`${store.url}/product/drill`);
-      expect(normal).toContain(NORMAL_STATE);
+      expect(stateMarker(normal)).toBe(NORMAL_STATE);
 
       await store.control.setMode('blocked');
       const blocked = await get(`${store.url}/product/drill`);
 
-      expect(blocked).toContain(BLOCKED_SHELL_STATE);
+      expect(stateMarker(blocked)).toBe(BLOCKED_SHELL_STATE);
       expect(blocked).toContain('data-testid="captcha-challenge"');
-      expect(blocked).not.toContain(NORMAL_STATE);
+      expect(blocked).not.toContain('$19.99');
     } finally {
       await store.stop();
     }
@@ -94,6 +155,30 @@ describe('blocked mode', () => {
       await store.stop();
     }
   });
+
+  it('hands a script-executing client one self-consistent document, not two readings', async () => {
+    const store = await startFakestoreFixture();
+    try {
+      await store.control.setProduct('drill', PRODUCT);
+      await store.control.setMode('blocked');
+
+      const blocked = await get(`${store.url}/product/drill`);
+      expect(stateMarker(blocked)).toBe(BLOCKED_SHELL_STATE);
+
+      const materialized = materialize(blocked);
+
+      // The body arrives...
+      expect(materialized.main).toContain('data-testid="product-price"');
+      expect(materialized.main).toContain('$19.99');
+      expect(materialized.main).not.toContain('captcha-challenge');
+      // ...and the page stops claiming to be blocked. A client that keys on the
+      // documented marker to decide whether to escalate must not read `blocked`
+      // off a page it has already successfully observed.
+      expect(materialized.state).toBe(NORMAL_STATE);
+    } finally {
+      await store.stop();
+    }
+  });
 });
 
 describe('hard-blocked mode', () => {
@@ -105,7 +190,7 @@ describe('hard-blocked mode', () => {
 
       const shell = await get(`${store.url}/product/drill`);
 
-      expect(shell).toContain(BLOCKED_SHELL_STATE);
+      expect(stateMarker(shell)).toBe(BLOCKED_SHELL_STATE);
       expect(shell).not.toContain('19.99');
       expect(shell).not.toContain('atob(');
     } finally {
@@ -123,7 +208,7 @@ describe('hard-blocked mode', () => {
         [ESCALATION_HEADER]: DEFAULT_ESCALATION_TOKEN,
       });
 
-      expect(content).toContain(NORMAL_STATE);
+      expect(stateMarker(content)).toBe(NORMAL_STATE);
       expect(content).toContain('$19.99');
     } finally {
       await store.stop();
@@ -139,7 +224,7 @@ describe('hard-blocked mode', () => {
 
       for (const wrong of ['', 'not-the-token', 'the-real-token-with-suffix', 'THE-REAL-TOKEN']) {
         const shell = await get(`${store.url}/product/drill`, { [ESCALATION_HEADER]: wrong });
-        expect(shell, `token ${JSON.stringify(wrong)} must not pass`).toContain(
+        expect(stateMarker(shell), `token ${JSON.stringify(wrong)} must not pass`).toBe(
           BLOCKED_SHELL_STATE,
         );
       }
@@ -217,7 +302,7 @@ describe('the mode control plane', () => {
       await expect(store.control.setMode('sideways' as 'blocked')).rejects.toThrow(/400/);
 
       expect(await store.control.mode()).toBe('blocked');
-      expect(await get(`${store.url}/product/drill`)).toContain(BLOCKED_SHELL_STATE);
+      expect(stateMarker(await get(`${store.url}/product/drill`))).toBe(BLOCKED_SHELL_STATE);
     } finally {
       await store.stop();
     }
@@ -231,8 +316,8 @@ describe('the mode control plane', () => {
       await b.control.setProduct('drill', PRODUCT);
       await a.control.setMode('blocked');
 
-      expect(await get(`${a.url}/product/drill`)).toContain(BLOCKED_SHELL_STATE);
-      expect(await get(`${b.url}/product/drill`)).toContain(NORMAL_STATE);
+      expect(stateMarker(await get(`${a.url}/product/drill`))).toBe(BLOCKED_SHELL_STATE);
+      expect(stateMarker(await get(`${b.url}/product/drill`))).toBe(NORMAL_STATE);
       expect(await b.control.mode()).toBe('normal');
     } finally {
       await a.stop();
@@ -246,10 +331,10 @@ describe('the mode control plane', () => {
       await store.control.setProduct('drill', PRODUCT);
 
       const shorthand = await get(`${store.url}/product/drill?mode=blocked`);
-      expect(shorthand).toContain(BLOCKED_SHELL_STATE);
+      expect(stateMarker(shorthand)).toBe(BLOCKED_SHELL_STATE);
 
       expect(await store.control.mode()).toBe('normal');
-      expect(await get(`${store.url}/product/drill`)).toContain(NORMAL_STATE);
+      expect(stateMarker(await get(`${store.url}/product/drill`))).toBe(NORMAL_STATE);
     } finally {
       await store.stop();
     }
@@ -261,11 +346,11 @@ describe('the mode control plane', () => {
       await store.control.setProduct('drill', PRODUCT);
       await store.control.setMode('blocked');
 
-      expect(await get(`${store.url}/product/drill`)).toContain(BLOCKED_SHELL_STATE);
-      expect(await get(`${store.url}/product/drill`)).toContain(BLOCKED_SHELL_STATE);
+      expect(stateMarker(await get(`${store.url}/product/drill`))).toBe(BLOCKED_SHELL_STATE);
+      expect(stateMarker(await get(`${store.url}/product/drill`))).toBe(BLOCKED_SHELL_STATE);
 
       await store.control.setMode('normal');
-      expect(await get(`${store.url}/product/drill`)).toContain(NORMAL_STATE);
+      expect(stateMarker(await get(`${store.url}/product/drill`))).toBe(NORMAL_STATE);
     } finally {
       await store.stop();
     }

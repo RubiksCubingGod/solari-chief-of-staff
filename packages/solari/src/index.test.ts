@@ -20,8 +20,12 @@ describe('@chief-of-staff/solari', () => {
     expect(Object.keys(solari).sort()).toEqual([
       'BrowserProviderError',
       'PROXY_COUNTRIES',
+      'ProfileStoreError',
+      'SOLARI_CONSOLE_URL',
       'STICKY_DURATION_MINUTES',
+      'consoleProfilesUrl',
       'createLocalProvider',
+      'createSolariProfileStore',
       'createSolariProvider',
       'reportReleaseFailureToConsole',
       'withBrowser',

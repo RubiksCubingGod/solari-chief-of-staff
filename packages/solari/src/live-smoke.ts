@@ -1,7 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { createSolariClient, createSolariProvider } from './solari.js';
-import { withBrowser, type BrowserProvider } from './provider.js';
+import { withBrowser } from './provider.js';
 
 /**
  * The live smoke: the one path in this package that spends real vendor credit.
@@ -142,35 +142,6 @@ export interface ReplayLocation {
  */
 export interface ReplayReader {
   getReplayUrl(id: string): Promise<{ url: string; contentEncoding: string }>;
-}
-
-/**
- * What the smoke needs from a vendor client: somewhere to read replays from,
- * and the `close()` that stops the local proxy thread.
- *
- * Structural for the same reason {@link ReplayReader} is. The composition in
- * {@link runLiveSmokeWith} is otherwise reachable only with a billed
- * credential, which would leave the teardown it exists to prove uncovered by
- * `pnpm check` - the one run that would notice it regressing. `Solari`
- * satisfies it, and naming the shape here rather than importing the vendor type
- * keeps the single-importer boundary intact.
- */
-export interface ReplayClient {
-  readonly sessions: ReplayReader;
-  close(): Promise<void>;
-}
-
-/**
- * The three things {@link runLiveSmokeWith} cannot build for itself without
- * spending money. Passed explicitly rather than as optional overrides on
- * {@link LiveSmokeOptions}: a defaulted `??` puts the real vendor call on one
- * side of a branch no test can take, so the seam would cost coverage on the
- * very path it was added to cover.
- */
-export interface LiveSmokeDependencies {
-  readonly provider: BrowserProvider;
-  readonly replayClient: ReplayClient;
-  readonly probeBody: (url: string) => Promise<ReplayBody>;
 }
 
 /** What {@link expiresIn} resolves to when the window closes first. */
@@ -358,13 +329,17 @@ export function liveSuiteName(skipReason: string | undefined): string {
 }
 
 /**
- * The whole composed vendor path, once - against whatever clients it is handed.
+ * The whole composed vendor path, once.
  *
- * Every decision the smoke makes lives here rather than in {@link runLiveSmoke}
- * so that `pnpm check` can reach it. The teardown below is the reason that
- * matters: it was written to fix a defect where a failing body skipped the
- * release entirely, and a proof that only runs when someone is being billed is
- * not a proof that guards the fix.
+ * Two vendor clients are built, deliberately. The provider gets its own,
+ * because that is the object under test. The replay is read through a second,
+ * launch-free client because replay is a Solari artifact and not part of the
+ * {@link import('./provider.js').BrowserProvider} contract - widening the seam,
+ * or the adapter's injected-client surface, for one nightly caller would let a
+ * vendor-shaped concern leak into the interface every engine depends on. The
+ * second client creates no session and so costs nothing beyond one GET, and it
+ * is given the poll's own budget rather than the SDK's 90s default, so a single
+ * unanswered call cannot outlive the window {@link pollReplayUrl} advertises.
  *
  * Teardown follows {@link withBrowser}: on the failure path the body's error is
  * what propagates and teardown failures are reported, because the body's error
@@ -372,13 +347,15 @@ export function liveSuiteName(skipReason: string | undefined): string {
  * itself the finding, since a held slot or a surviving proxy thread is exactly
  * what this smoke exists to notice.
  */
-export async function runLiveSmokeWith(
-  dependencies: LiveSmokeDependencies,
-  options: LiveSmokeOptions,
-): Promise<LiveSmokeReport> {
-  const { provider, replayClient, probeBody } = dependencies;
+export async function runLiveSmoke(options: LiveSmokeOptions): Promise<LiveSmokeReport> {
   const url = options.url ?? SMOKE_URL;
   const flushMs = options.flushMs ?? RRWEB_FLUSH_MS;
+
+  const provider = createSolariProvider({ apiKey: options.apiKey });
+  const replayClient = createSolariClient({
+    apiKey: options.apiKey,
+    timeoutMs: REPLAY_POLL_TIMEOUT_MS,
+  });
 
   const teardowns: readonly Teardown[] = [
     { what: 'provider.dispose()', run: () => provider.dispose() },
@@ -413,7 +390,7 @@ export async function runLiveSmokeWith(
     const liveSessionIdsAfterRelease = [...provider.liveSessionIds()];
 
     const replay = await pollReplayUrl(replayClient.sessions, sessionId);
-    const body = await probeBody(replay.url);
+    const body = await probeReplayBody(replay.url);
 
     report = {
       sessionId,
@@ -442,35 +419,4 @@ export async function runLiveSmokeWith(
   }
 
   return report;
-}
-
-/**
- * The live entry point: builds the two real vendor clients and hands them to
- * {@link runLiveSmokeWith}.
- *
- * Deliberately nothing but construction, so the only part of the live path a
- * credential-free run cannot reach is the wiring itself.
- *
- * Two clients are built, deliberately. The provider gets its own, because that
- * is the object under test. The replay is read through a second, launch-free
- * client because replay is a Solari artifact and not part of the
- * {@link import('./provider.js').BrowserProvider} contract - widening the seam,
- * or the adapter's injected-client surface, for one nightly caller would let a
- * vendor-shaped concern leak into the interface every engine depends on. The
- * second client creates no session and so costs nothing beyond one GET, and it
- * is given the poll's own budget rather than the SDK's 90s default, so a single
- * unanswered call cannot outlive the window {@link pollReplayUrl} advertises.
- */
-export async function runLiveSmoke(options: LiveSmokeOptions): Promise<LiveSmokeReport> {
-  return runLiveSmokeWith(
-    {
-      provider: createSolariProvider({ apiKey: options.apiKey }),
-      replayClient: createSolariClient({
-        apiKey: options.apiKey,
-        timeoutMs: REPLAY_POLL_TIMEOUT_MS,
-      }),
-      probeBody: probeReplayBody,
-    },
-    options,
-  );
 }

@@ -38,6 +38,13 @@ afterEach(async () => {
   for (const server of running.splice(0)) await server.stop();
 });
 
+/**
+ * The only test in the API that binds a socket, so it pays for a real listen
+ * and a real `fetch` on top of the Fastify boot the rest of the suite injects
+ * around. Under `pnpm check` that happens beside the coverage-instrumented run
+ * and three Next dev servers; measured at 8.2s against the 5s default. The
+ * budget is the suite's because every test here starts its own server.
+ */
 describe('startServer', () => {
   it('binds the configured host and port, and answers /health there', async () => {
     const config = await environment();
@@ -60,4 +67,4 @@ describe('startServer', () => {
 
     await expect(fetch(`${url}/health`)).rejects.toThrow();
   });
-});
+}, 60_000);

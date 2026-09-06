@@ -19,6 +19,14 @@ const STEPS = [
   },
   { name: 'test', argv: ['scripts/vitest.mjs', 'run', '--coverage'] },
   { name: 'build', argv: ['node_modules/typescript/bin/tsc', '--build'] },
+  // The dashboard is an application rather than a library, so `tsc --build`
+  // has nothing to emit for it and does not type-check it either. This is the
+  // step that does both, against packages/web/tsconfig.json. It runs after the
+  // build because the packages it imports resolve through their `dist`.
+  {
+    name: 'build:web',
+    argv: ['packages/web/node_modules/next/dist/bin/next', 'build', 'packages/web'],
+  },
 ];
 
 /** @param {{name: string, argv: string[]}} step */

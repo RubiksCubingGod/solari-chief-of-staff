@@ -15,5 +15,9 @@
   ],
   "scripts": {
     "build": "tsc --build"
+  },
+  "dependencies": {
+    "cheerio": "1.2.0",
+    "cron-parser": "5.10.0"
   }
 }

@@ -20,11 +20,20 @@ export const ERROR_CODES = [
   'bad_request',
   'malformed_json',
   'validation_failed',
+  // A request that named nobody the server believes. Distinct from
+  // `not_found`, which is what a caller who *is* somebody is told about a row
+  // that is not theirs: the two answer different questions and a client that
+  // conflated them would offer a login to somebody who is already logged in.
+  'unauthorized',
   'not_found',
   'method_not_allowed',
   'payload_too_large',
   'unsupported_media_type',
   'internal_error',
+  // Something this server fetches on the caller's behalf - a task's recording,
+  // from its store - refused or did not answer. Distinct from `internal_error`:
+  // nothing here is broken, and a client that retried later might well get it.
+  'upstream_unavailable',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -62,12 +71,20 @@ export function violationDetails(violations: readonly SchemaViolation[]): ErrorD
 export class HttpError extends Error {
   readonly statusCode: number;
   readonly code: ErrorCode;
+  /**
+   * Per-field refusals, for a handler that judged a body JSON Schema had
+   * already accepted: the shape was right, the meaning was not. They travel in
+   * the envelope's `details` exactly as schema violations do, so a client
+   * fixing a form does not have to know which layer refused it.
+   */
+  readonly details: readonly ErrorDetail[] | undefined;
 
-  constructor(statusCode: number, code: ErrorCode, message: string) {
+  constructor(statusCode: number, code: ErrorCode, message: string, details?: readonly ErrorDetail[]) {
     super(message);
     this.name = 'HttpError';
     this.statusCode = statusCode;
     this.code = code;
+    this.details = details;
   }
 }
 

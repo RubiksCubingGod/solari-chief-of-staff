@@ -93,6 +93,12 @@ export function blockedShellPage(payload?: string): string {
           '      <script>',
           "        document.addEventListener('DOMContentLoaded', function () {",
           `          document.querySelector('main').innerHTML = atob('${Buffer.from(payload, 'utf8').toString('base64')}');`,
+          // The marker travels with the body. Materializing the content and
+          // leaving the head saying `blocked` would hand a script-executing
+          // client two contradictory readings of one page, and the escalation
+          // decision this marker exists to drive would either burn a tier-2
+          // fetch on a page it already has or discard a good observation.
+          `          document.querySelector('meta[name="fixture-state"]').setAttribute('content', '${NORMAL_STATE}');`,
           '        });',
           '      </script>',
         ];

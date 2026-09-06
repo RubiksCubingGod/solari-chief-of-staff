@@ -1,0 +1,13 @@
+{
+  "note": "The bar the nightly live evals are held to: pass or fail per scenario, as the last accepted live run left them. It moves only by editing this file in a pull request; a run below it fails, a run above it says so in its report, and nothing commits a new bar but a person. Every scenario starts at pass, by intent, until a live run and a pull request say otherwise.",
+  "scenarios": {
+    "gym-blocked-shell": "pass",
+    "gym-budget": "pass",
+    "gym-cancel": "pass",
+    "gym-hard-blocked": "pass",
+    "gym-partner-handoff": "pass",
+    "store-price": "pass",
+    "store-redesign": "pass",
+    "trap-payment": "pass"
+  }
+}

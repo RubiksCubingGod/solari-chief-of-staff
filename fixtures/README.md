@@ -27,9 +27,30 @@ These sites listen on loopback. A Solari cloud browser cannot reach them, so eve
 every sprint runs on LocalProvider (plain Playwright) or over plain HTTP. Nothing here is reachable
 from the `@live` tier, and no fixture proof should expect a Solari session, recording, or replay URL.
 
+## The shared control plane
+
+Every fixture mounts the same three routes, from `mountInstanceRoutes` in `harness.ts` rather than
+from four routers that happen to agree:
+
+| Route | Meaning |
+| --- | --- |
+| `GET /__test/state` | everything the instance knows, as JSON |
+| `POST /__test/seed` | set the whole starting state in one call; refused seeds apply nothing |
+| `POST /__test/reset` | return the instance to the baseline its last seed established |
+
+Isolation still comes from the boot model, not from `reset` — two instances never share state and
+never needed resetting to be independent. `reset` is for a test that wants several rounds against
+one instance without paying for another boot.
+
+`POST /__test/mode` is mounted where every mode has a specified meaning: the observation targets,
+`fakedmv`, whose calendar is the page a slot watch observes, and `fakegym`, whose cancellation flow
+gives `redesign` a meaning of its own (below). Modes are defined by `hostile-mode-surfaces` for
+pages an engine *observes*; a form POST has no layout to rotate and no shell to serve, so on
+`fakedmv` and `fakegym` alike the POSTs answer JSON in every mode.
+
 ## Hostile modes
 
-Any observation target (`fakestore`, `fakenews`) can be put into a mode through
+Any observation target (`fakestore`, `fakenews`, `fakedmv`), and `fakegym`, can be put into a mode through
 `POST /__test/mode`, taking effect on the next request to the same URL. `?mode=` on a single
 request overrides for that request only, for manual pokes; it never writes the stored mode. An
 unknown mode is refused with a 400 and the instance keeps the mode it had.
@@ -37,12 +58,19 @@ unknown mode is refused with a 400 and the instance keeps the mode it had.
 | Mode | Fetch surface | Selector surface |
 | --- | --- | --- |
 | `normal` | the page as specified | the normal layout |
-| `blocked` | captcha shell to a plain fetch; the body travels base64-encoded in a script, so only a client that executes JavaScript materializes it | normal |
+| `blocked` | captcha shell to a plain fetch; the body travels base64-encoded in a script, so only a client that executes JavaScript materializes it — and that script flips `fixture-state` to normal with the body, so a client never holds normal content still labelled blocked | normal |
 | `hard-blocked` | captcha shell with no recoverable body; the real content is served only to a request carrying the escalation header | normal |
 | `redesign` | normal | class names, ids, and nesting rotate to a deterministic second layout |
 
 A mode never changes the URL, and `redesign` never changes the semantic surface: accessible names,
 ARIA roles, heading structure, visible text, and `data-testid` hooks stay byte-identical.
+
+On `fakegym` the modes wrap every page the flow shows (`blocked` and `hard-blocked` serve the shells
+above; the form POSTs still answer JSON), and `redesign` changes what happens rather than how it
+looks: declining the retention offer is answered with a 302 to
+`http://localhost:<port>/partner/retention`, the same server by a host a task's allowlist does not
+carry, before the session's progress has moved. That is what lets action-playbooks prove an engine
+stops at the edge of its lane and leaves the membership untouched.
 
 ### The escalation header
 
@@ -69,7 +97,9 @@ distinguishable from the blocked shell.
 GET /product/:id
 GET /__test/mode
 POST /__test/mode
+GET /__test/state
 POST /__test/seed
+POST /__test/reset
 GET /__test/product/:id
 POST /__test/product/:id
 ```
@@ -82,7 +112,9 @@ An article page carrying a headline and body, with the same mode contract as fak
 GET /article/:id
 GET /__test/mode
 POST /__test/mode
+GET /__test/state
 POST /__test/seed
+POST /__test/reset
 GET /__test/article/:id
 POST /__test/article/:id
 ```
@@ -98,20 +130,26 @@ which is what makes "the engine actually asked the user" provable. Refusals are 
 
 ```routes
 GET /
-GET /login
-POST /login
-GET /member
-GET /cancel/step-1
-POST /cancel/step-1
-GET /cancel/step-2
-POST /cancel/step-2
-GET /cancel/step-3
-POST /cancel/step-3
-GET /cancel/confirm
-POST /cancel/confirm
-POST /__test/member
 GET /__test/member/:id
 GET /__test/member/:id/code
+GET /__test/mode
+GET /__test/state
+GET /cancel/confirm
+GET /cancel/step-1
+GET /cancel/step-2
+GET /cancel/step-3
+GET /login
+GET /member
+GET /partner/retention
+POST /__test/member
+POST /__test/mode
+POST /__test/reset
+POST /__test/seed
+POST /cancel/confirm
+POST /cancel/step-1
+POST /cancel/step-2
+POST /cancel/step-3
+POST /login
 ```
 
 ### fakedmv (port 4304)
@@ -121,9 +159,19 @@ contested slot is awarded exactly once under concurrency; losers are refused as 
 deliberately distinct from the `transient` refusal that `POST /__test/failure` injects — one means
 re-arm, the other means retry.
 
+The calendar at `GET /appointments` is the page a slot watch observes, so it carries the hostile
+modes above: `blocked` and `hard-blocked` serve the shells, and `redesign` renders the same slots
+as a table with every class and nesting changed. `POST /book` answers JSON in every mode. The seed
+takes `mode` and `escalationToken` beside `slots` and `failureMode`, and `reset` restores all four.
+
 ```routes
 GET /appointments
 POST /book
+GET /__test/state
+POST /__test/seed
+POST /__test/reset
+GET /__test/mode
+POST /__test/mode
 GET /__test/slots
 POST /__test/slots
 DELETE /__test/slots/:id

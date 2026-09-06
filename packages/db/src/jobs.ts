@@ -50,11 +50,47 @@ export interface JobRecord {
   readonly output: unknown;
 }
 
+export interface EnqueueOptions {
+  /**
+   * Hold the job until this moment. A deadline that lives in the queue survives
+   * the process that set it, which a timer in that process would not.
+   */
+  readonly startAfter?: Date;
+}
+
+export interface ScheduleOptions {
+  /**
+   * Names one schedule among many on the same queue - a watch's id - so each
+   * has its own cron and removing one leaves the others alone. Without a key
+   * a queue has a single schedule. Letters, digits, `_`, `.`, `-` and `/`.
+   */
+  readonly key?: string;
+}
+
+export interface ScheduleRecord {
+  readonly queue: string;
+  /** Empty for the unkeyed schedule. */
+  readonly key: string;
+  readonly cron: string;
+  readonly payload: unknown;
+}
+
 export interface JobHarness {
+  /** The pg-boss schema this harness's queues live in. */
+  readonly schema: string;
   start(): Promise<void>;
   register<TPayload>(queue: string, handler: JobHandler<TPayload>): Promise<void>;
-  enqueue(queue: string, payload: object): Promise<string>;
-  schedule(queue: string, cron: string, payload?: object): Promise<void>;
+  enqueue(queue: string, payload: object, options?: EnqueueOptions): Promise<string>;
+  /**
+   * Registers, or replaces, the schedule with this key (or the unkeyed one).
+   * The cron is evaluated in UTC whatever zone the worker runs in, which is
+   * the clock the API's door judged it by.
+   */
+  schedule(queue: string, cron: string, payload?: object, options?: ScheduleOptions): Promise<void>;
+  /** Removes the schedule with this key, or the unkeyed one. Nothing to remove is not an error. */
+  unschedule(queue: string, key?: string): Promise<void>;
+  /** Every schedule on the queue, keyed or not, in no particular order. */
+  schedules(queue: string): Promise<ScheduleRecord[]>;
   inspect(queue: string, jobId: string): Promise<JobRecord | null>;
   stop(options?: StopOptions): Promise<void>;
 }
@@ -80,9 +116,10 @@ export function createJobHarness(options: JobHarnessOptions): JobHarness {
   const retryPolicy = options.retryPolicy ?? DEFAULT_RETRY_POLICY;
   const pollingIntervalSeconds = options.pollingIntervalSeconds ?? 2;
   const shutdownTimeoutSeconds = options.shutdownTimeoutSeconds ?? DEFAULT_SHUTDOWN_TIMEOUT_SECONDS;
+  const schema = options.schema ?? 'pgboss';
   const boss = new PgBoss({
     connectionString: options.connectionString,
-    schema: options.schema ?? 'pgboss',
+    schema,
     schedule: true,
     // pg-boss caps both at 45s. Ten seconds means a due cron dispatches within
     // ten seconds of its minute and a schedule change is noticed about as fast,
@@ -108,6 +145,8 @@ export function createJobHarness(options: JobHarnessOptions): JobHarness {
   }
 
   return {
+    schema,
+
     async start(): Promise<void> {
       await boss.start();
     },
@@ -121,9 +160,13 @@ export function createJobHarness(options: JobHarnessOptions): JobHarness {
       });
     },
 
-    async enqueue(queue: string, payload: object): Promise<string> {
+    async enqueue(queue: string, payload: object, enqueueOptions?: EnqueueOptions): Promise<string> {
       await ensureQueue(queue);
-      const id = await boss.send(queue, payload);
+      const id = await boss.send(
+        queue,
+        payload,
+        enqueueOptions?.startAfter === undefined ? {} : { startAfter: enqueueOptions.startAfter },
+      );
       if (id === null) {
         // Only a queue policy that refuses duplicates returns no id, and these
         // queues are all standard, so this means the queue was dropped between
@@ -133,9 +176,31 @@ export function createJobHarness(options: JobHarnessOptions): JobHarness {
       return id;
     },
 
-    async schedule(queue: string, cron: string, payload?: object): Promise<void> {
+    async schedule(
+      queue: string,
+      cron: string,
+      payload?: object,
+      scheduleOptions?: ScheduleOptions,
+    ): Promise<void> {
       await ensureQueue(queue);
-      await boss.schedule(queue, cron, payload ?? {});
+      await boss.schedule(queue, cron, payload ?? {}, {
+        tz: 'UTC',
+        ...(scheduleOptions?.key === undefined ? {} : { key: scheduleOptions.key }),
+      });
+    },
+
+    async unschedule(queue: string, key?: string): Promise<void> {
+      await boss.unschedule(queue, key ?? '');
+    },
+
+    async schedules(queue: string): Promise<ScheduleRecord[]> {
+      const rows = await boss.getSchedules(queue);
+      return rows.map((row) => ({
+        queue: row.name,
+        key: row.key,
+        cron: row.cron,
+        payload: row.data ?? {},
+      }));
     },
 
     async inspect(queue: string, jobId: string): Promise<JobRecord | null> {

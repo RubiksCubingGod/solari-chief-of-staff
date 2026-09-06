@@ -41,3 +41,17 @@ export {
   type SolariSessionHandle,
   STICKY_DURATION_MINUTES,
 } from './solari.js';
+
+export {
+  type BrowserProfile,
+  consoleProfilesUrl,
+  createSolariProfileStore,
+  type ProfileClient,
+  type ProfileStore,
+  ProfileStoreError,
+  type ProfileStoreErrorKind,
+  type ProfileStoreErrorOptions,
+  type ProfileStoreOptions,
+  SOLARI_CONSOLE_URL,
+  type VendorProfiles,
+} from './profiles.js';

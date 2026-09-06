@@ -19,6 +19,13 @@ minimumReleaseAgeExclude:
 # cannot load a config file without it. The rest are optional native speedups
 # for the Testcontainers SSH path that the pure-JS fallbacks already cover.
 allowBuilds:
+  # Unpacks the stock PostgreSQL binaries the no-container test path runs. Only
+  # the current platform's package installs, and none of them ship: this is the
+  # third rung of the test-database ladder, never a runtime dependency.
+  '@embedded-postgres/darwin-arm64': true
+  '@embedded-postgres/darwin-x64': true
+  '@embedded-postgres/linux-x64': true
+  '@embedded-postgres/windows-x64': true
   cpu-features: false
   esbuild: true
   protobufjs: false

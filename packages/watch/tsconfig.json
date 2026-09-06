@@ -1,0 +1,29 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "src/**/*.test.ts",
+    "src/**/*.integration.test.ts",
+    "src/testing/**"
+  ],
+  "references": [
+    {
+      "path": "../agent"
+    },
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../db"
+    },
+    {
+      "path": "../solari"
+    }
+  ]
+}

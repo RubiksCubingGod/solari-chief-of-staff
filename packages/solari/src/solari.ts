@@ -230,7 +230,7 @@ interface VendorFailure {
   readonly code?: string;
 }
 
-function readVendorFailure(error: unknown): VendorFailure {
+export function readVendorFailure(error: unknown): VendorFailure {
   if (typeof error !== 'object' || error === null) return {};
   const { status, code } = error as { status?: unknown; code?: unknown };
   return {

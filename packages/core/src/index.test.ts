@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  CALENDAR_ANNOTATIONS,
+  CALENDAR_AUTO_CANCEL_STATES,
   CALENDAR_ITEM_KINDS,
   CALENDAR_ITEM_STATUSES,
+  CALENDAR_REMINDER_STATES,
+  DELIVERY_STATUSES,
   FETCH_TIERS,
   MESSAGE_CHANNELS,
   MESSAGE_DIRECTIONS,
@@ -12,10 +16,15 @@ import {
   TASK_MODES,
   TASK_STATUSES,
   TIER_POLICIES,
+  WATCH_HEALTH_STATES,
   WATCH_KINDS,
   WATCH_STATUSES,
+  isCalendarAnnotation,
+  isCalendarAutoCancelState,
   isCalendarItemKind,
   isCalendarItemStatus,
+  isCalendarReminderState,
+  isDeliveryStatus,
   isFetchTier,
   isMessageChannel,
   isMessageDirection,
@@ -25,6 +34,7 @@ import {
   isTaskMode,
   isTaskStatus,
   isTierPolicy,
+  isWatchHealth,
   isWatchKind,
   isWatchStatus,
   memberGuard,
@@ -57,6 +67,7 @@ describe('domain vocabulary', () => {
     { name: 'TASK_EVENT_TYPES', values: TASK_EVENT_TYPES, guard: isTaskEventType },
     { name: 'CALENDAR_ITEM_KINDS', values: CALENDAR_ITEM_KINDS, guard: isCalendarItemKind },
     { name: 'WATCH_STATUSES', values: WATCH_STATUSES, guard: isWatchStatus },
+    { name: 'WATCH_HEALTH_STATES', values: WATCH_HEALTH_STATES, guard: isWatchHealth },
     { name: 'FETCH_TIERS', values: FETCH_TIERS, guard: isFetchTier },
     { name: 'TIER_POLICIES', values: TIER_POLICIES, guard: isTierPolicy },
     {
@@ -67,6 +78,18 @@ describe('domain vocabulary', () => {
     { name: 'CALENDAR_ITEM_STATUSES', values: CALENDAR_ITEM_STATUSES, guard: isCalendarItemStatus },
     { name: 'MESSAGE_DIRECTIONS', values: MESSAGE_DIRECTIONS, guard: isMessageDirection },
     { name: 'MESSAGE_CHANNELS', values: MESSAGE_CHANNELS, guard: isMessageChannel },
+    { name: 'DELIVERY_STATUSES', values: DELIVERY_STATUSES, guard: isDeliveryStatus },
+    { name: 'CALENDAR_ANNOTATIONS', values: CALENDAR_ANNOTATIONS, guard: isCalendarAnnotation },
+    {
+      name: 'CALENDAR_REMINDER_STATES',
+      values: CALENDAR_REMINDER_STATES,
+      guard: isCalendarReminderState,
+    },
+    {
+      name: 'CALENDAR_AUTO_CANCEL_STATES',
+      values: CALENDAR_AUTO_CANCEL_STATES,
+      guard: isCalendarAutoCancelState,
+    },
   ] as const satisfies readonly {
     name: string;
     values: readonly string[];

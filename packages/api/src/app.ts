@@ -1,15 +1,27 @@
 import { createDatabase, type Database } from '@chief-of-staff/db';
+import {
+  consoleProfilesUrl,
+  createSolariProfileStore,
+  SOLARI_CONSOLE_URL,
+  type ProfileStore,
+} from '@chief-of-staff/solari';
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 
+import { createMailer, type MailerPort } from './auth/mailer.js';
+import { loadAuthConfig, type AuthConfig } from './auth/session.js';
 import { loadConfig, type AppConfig } from './config.js';
-import { declaredErrorCode, errorEnvelope, violationDetails, type ErrorCode } from './errors.js';
+import { createConnectAttemptLedger, type ConnectAttemptLedger } from './connect-attempts.js';
+import { HttpError, declaredErrorCode, errorEnvelope, violationDetails, type ErrorCode } from './errors.js';
 import { AJV_FORMATS } from './formats.js';
 import { registerRoutes } from './routes/index.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
     readonly config: AppConfig;
+    readonly auth: AuthConfig;
     readonly db: Database['db'];
+    readonly mailer: MailerPort;
+    readonly connect: ConnectSupport;
   }
   interface FastifyRequest {
     userId: string;
@@ -22,13 +34,64 @@ declare module 'fastify' {
  */
 const CODE_BY_STATUS: Readonly<Record<number, ErrorCode>> = {
   400: 'malformed_json',
+  401: 'unauthorized',
   404: 'not_found',
   405: 'method_not_allowed',
   413: 'payload_too_large',
   415: 'unsupported_media_type',
 };
 
-export function createApp(environment: NodeJS.ProcessEnv = process.env): FastifyInstance {
+/** How long a person has to log in before an unconfirmed attempt is discarded. */
+export const DEFAULT_CONNECT_TIMEOUT_MS = 15 * 60 * 1000;
+
+export interface AppOptions {
+  /**
+   * The vendor's profiles, for connecting a site. Absent, the server builds
+   * one from `SOLARI_API_KEY` when that is set, and otherwise answers every
+   * connect with a 503 that says so: a dashboard without a vendor key is a
+   * dashboard that cannot connect sites, not one that pretends to.
+   */
+  readonly profileStore?: ProfileStore;
+  /** Overrides `SITE_CONNECT_TIMEOUT_MS`. */
+  readonly connectTimeoutMs?: number;
+  /** Overrides `SOLARI_CONSOLE_URL`. */
+  readonly solariConsoleUrl?: string;
+}
+
+/** What the site-connection routes need that no other route does. */
+export interface ConnectSupport {
+  readonly store: ProfileStore | undefined;
+  readonly attempts: ConnectAttemptLedger | undefined;
+  /** The vendor console's profile list, where a person logs in. */
+  readonly editorUrl: string;
+}
+
+function readTimeout(environment: NodeJS.ProcessEnv): number {
+  const raw = environment['SITE_CONNECT_TIMEOUT_MS'];
+  if (raw === undefined || raw === '') return DEFAULT_CONNECT_TIMEOUT_MS;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_CONNECT_TIMEOUT_MS;
+}
+
+function readProfileStore(environment: NodeJS.ProcessEnv): ProfileStore | undefined {
+  const apiKey = environment['SOLARI_API_KEY'];
+  if (apiKey === undefined || apiKey === '') return undefined;
+  const baseUrl = environment['SOLARI_BASE_URL'];
+  return createSolariProfileStore({
+    apiKey,
+    ...(baseUrl === undefined || baseUrl === '' ? {} : { baseUrl }),
+  });
+}
+
+function readConsoleUrl(environment: NodeJS.ProcessEnv): string {
+  const raw = environment['SOLARI_CONSOLE_URL'];
+  return raw === undefined || raw === '' ? SOLARI_CONSOLE_URL : raw;
+}
+
+export function createApp(
+  environment: NodeJS.ProcessEnv = process.env,
+  options: AppOptions = {},
+): FastifyInstance {
   const config = loadConfig(environment);
   const database = createDatabase(config.databaseUrl);
   const app = Fastify({
@@ -46,13 +109,36 @@ export function createApp(environment: NodeJS.ProcessEnv = process.env): Fastify
   });
 
   app.decorate('config', config);
+  app.decorate('auth', loadAuthConfig(environment, config));
   app.decorate('db', database.db);
+  // Recording everywhere but production, where no vendor is chosen yet and the
+  // absence has to be loud. See `auth/mailer.ts`.
+  app.decorate('mailer', createMailer(config.runtimeEnvironment));
+  const store = options.profileStore ?? readProfileStore(environment);
+  const attempts =
+    store === undefined
+      ? undefined
+      : createConnectAttemptLedger({
+          store,
+          timeoutMs: options.connectTimeoutMs ?? readTimeout(environment),
+          warn: (message, error) => app.log.warn({ err: error }, message),
+        });
+  app.decorate('connect', {
+    store,
+    attempts,
+    editorUrl: consoleProfilesUrl(options.solariConsoleUrl ?? readConsoleUrl(environment)),
+  } satisfies ConnectSupport);
   // The identity a route works on behalf of, filled in per request by
   // `resolveCaller`. Declared here because Fastify 5 will not accept a property
   // that was not declared on the request prototype.
   app.decorateRequest('userId', '');
   // The pool outlives every request but not the server, so closing the app
   // releases the connections rather than leaving a test process hanging.
+  // Open attempts first: each holds a vendor profile this process promised
+  // to delete if nobody claimed it, and nothing else remembers the promise.
+  app.addHook('onClose', async () => {
+    await attempts?.close();
+  });
   app.addHook('onClose', () => database.close());
 
   app.get('/health', () => ({ status: 'ok' }));
@@ -80,9 +166,11 @@ export function createApp(environment: NodeJS.ProcessEnv = process.env): Fastify
       return;
     }
     const status = error.statusCode ?? 500;
-    if (status >= 500) {
+    if (status >= 500 && !(error instanceof HttpError)) {
       // The reason stays in the log, where operators can see it, and out of the
-      // response, where a connection string would otherwise end up.
+      // response, where a connection string would otherwise end up. A handler
+      // that raised a 5xx itself - a store it fetched from being away - chose
+      // its own code and its own words, and is answered below as it asked.
       request.log.error({ err: error }, 'request handler failed');
       void reply
         .status(500)
@@ -92,7 +180,8 @@ export function createApp(environment: NodeJS.ProcessEnv = process.env): Fastify
     // A refusal a handler raised names its own code; anything Fastify raised is
     // identified by the status it chose.
     const code = declaredErrorCode(error.code) ?? CODE_BY_STATUS[status] ?? 'bad_request';
-    void reply.status(status).send(errorEnvelope(code, error.message));
+    const details = error instanceof HttpError ? error.details : undefined;
+    void reply.status(status).send(errorEnvelope(code, error.message, details));
   });
 
   return app;

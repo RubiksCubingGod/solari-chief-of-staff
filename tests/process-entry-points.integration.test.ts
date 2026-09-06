@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { createServer, type AddressInfo } from 'node:net';
 import { fileURLToPath } from 'node:url';
 
+import { runMigrations } from '@chief-of-staff/db';
 import { startTestPostgres, type TestPostgres } from '@chief-of-staff/db/testing';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
@@ -18,6 +19,9 @@ const running: ChildProcess[] = [];
 
 beforeAll(async () => {
   postgres = await startTestPostgres();
+  // A deployment runs `pnpm migrate` before either process; the worker's
+  // startup sweep reads the watches table.
+  await runMigrations(postgres.connectionString);
 });
 
 afterEach(() => {

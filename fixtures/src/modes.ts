@@ -35,7 +35,12 @@ export const DEFAULT_ESCALATION_TOKEN = 'fixture-escalation-token';
 export interface ModeControl {
   setMode(mode: FixtureMode): Promise<void>;
   mode(): Promise<FixtureMode>;
-  seed(input: { readonly escalationToken?: string }): Promise<void>;
+}
+
+/** The mode fields a whole-instance seed may carry. */
+export interface ModeSeed {
+  readonly mode?: FixtureMode;
+  readonly escalationToken?: string;
 }
 
 export function buildModeControl(request: ControlRequest): ModeControl {
@@ -44,9 +49,6 @@ export function buildModeControl(request: ControlRequest): ModeControl {
       await request('POST', '/__test/mode', { mode });
     },
     mode: async () => (await request<{ mode: FixtureMode }>('GET', '/__test/mode')).mode,
-    seed: async (input) => {
-      await request('POST', '/__test/seed', input);
-    },
   };
 }
 
@@ -56,6 +58,18 @@ function isMode(value: unknown): value is FixtureMode {
 
 export interface ModeState {
   mount(app: Express): void;
+  /** The current mode, for the instance's `GET /__test/state`. */
+  current(): FixtureMode;
+  /** The token `hard-blocked` compares against, for `GET /__test/state`. */
+  token(): string;
+  /**
+   * Applies the mode fields of a whole-instance seed and records them as the
+   * baseline `reset` restores. Returns a message to refuse, having applied
+   * neither field, so a bad token cannot leave a new mode installed.
+   */
+  seed(body: Record<string, unknown>): string | undefined;
+  /** Returns mode and token to the baseline the last seed established. */
+  reset(): void;
   /**
    * Serves a page through the instance's current mode. The site supplies both
    * layouts and stays ignorant of which one, if either, actually reaches the
@@ -67,8 +81,37 @@ export interface ModeState {
 export function createModeState(): ModeState {
   let mode: FixtureMode = 'normal';
   let escalationToken = DEFAULT_ESCALATION_TOKEN;
+  let baselineMode: FixtureMode = mode;
+  let baselineToken = escalationToken;
 
   return {
+    current: () => mode,
+    token: () => escalationToken,
+
+    seed(body) {
+      const { mode: nextMode, escalationToken: nextToken } = body;
+      if (nextMode !== undefined && !isMode(nextMode)) {
+        return `mode must be one of ${FIXTURE_MODES.join(', ')}`;
+      }
+      if (nextToken !== undefined && (typeof nextToken !== 'string' || nextToken === '')) {
+        return 'escalationToken must be a non-empty string';
+      }
+      if (nextMode !== undefined) {
+        mode = nextMode;
+      }
+      if (typeof nextToken === 'string') {
+        escalationToken = nextToken;
+      }
+      baselineMode = mode;
+      baselineToken = escalationToken;
+      return undefined;
+    },
+
+    reset() {
+      mode = baselineMode;
+      escalationToken = baselineToken;
+    },
+
     mount(app) {
       app.get('/__test/mode', (_request, response) => {
         response.json({ mode });
@@ -86,18 +129,6 @@ export function createModeState(): ModeState {
         }
         mode = next;
         response.json({ mode });
-      });
-
-      app.post('/__test/seed', (request, response) => {
-        const token = readRecord(request.body).escalationToken;
-        if (token !== undefined && (typeof token !== 'string' || token === '')) {
-          response.status(400).json({ error: 'escalationToken must be a non-empty string' });
-          return;
-        }
-        if (typeof token === 'string') {
-          escalationToken = token;
-        }
-        response.json({ escalationToken });
       });
     },
 

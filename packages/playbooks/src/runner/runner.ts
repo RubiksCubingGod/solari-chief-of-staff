@@ -1,0 +1,287 @@
+import type { StepEventPayload } from '@chief-of-staff/core';
+import {
+  expireSiteConnection,
+  readSiteConnection,
+  recordBrowserSession,
+  recordPlaybook,
+  type Mission,
+  type MissionOutcome,
+  type SiteConnection,
+  type Task,
+  type TaskAnswer,
+  type TaskDatabase,
+} from '@chief-of-staff/db';
+import type { BrowserProvider, BrowserRequest } from '@chief-of-staff/solari';
+import type { Page } from 'playwright';
+
+import {
+  guardedSession,
+  paymentConfirmations,
+  stopOutcome,
+  type Guardrails,
+} from '../guardrails/index.js';
+import type { Playbook, PlaybookContext, PlaybookStep, SiteCredential, StepOutcome } from './playbook.js';
+import type { PlaybookRegistry } from './registry.js';
+
+/**
+ * The runner: the mission every playbook-mode task goes through. It picks the
+ * playbook by what the task names, loads the person's connection to that
+ * site (unless the playbook is open: a site with no account behind it),
+ * opens one guarded session with a recording asked for, writes the
+ * session to the row, and runs the steps in order until one asks, one fails,
+ * the guard stops the session, or the last one is done. What it hands back
+ * is the state machine's own vocabulary, so the engine settles the task
+ * without knowing a playbook exists.
+ */
+
+/** What a connection yields for the login step. */
+export type CredentialSource = (
+  connection: SiteConnection,
+  task: Task,
+) => Promise<SiteCredential | undefined>;
+
+/**
+ * The production source: the profile the connection names. The cookies are in
+ * the provider's profile store; nothing here is a password, and nothing in
+ * the database is one either.
+ */
+export const profileCredentials: CredentialSource = (connection) =>
+  Promise.resolve({ kind: 'profile', profileId: connection.solariProfileId });
+
+export interface PlaybookRunnerOptions {
+  readonly db: TaskDatabase;
+  readonly provider: BrowserProvider;
+  readonly registry: PlaybookRegistry;
+  /** What a connection yields for the login step. The connection's profile unless told otherwise. */
+  readonly credentials?: CredentialSource;
+  /** Asked of every session, under the runner's own asks: the recording, and the profile. */
+  readonly request?: BrowserRequest;
+  /**
+   * The mission for a task no playbook matches: agentic mode, or a
+   * kind-and-site the registry has no entry for. Without one, such a task
+   * fails in a sentence that says so.
+   */
+  readonly fallback?: Mission;
+}
+
+export type PlaybookChoice =
+  | {
+      readonly kind: 'chosen';
+      readonly playbook: Playbook;
+      readonly input: Readonly<Record<string, unknown>>;
+    }
+  | { readonly kind: 'refused'; readonly reason: string }
+  /** Nothing is wrong with the task; the registry just has nothing for it. A fallback may. */
+  | { readonly kind: 'unmatched'; readonly reason: string };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Which playbook a task gets, or why none. A refusal is an input nothing
+ * could run; unmatched means no playbook claims the task - it asks for
+ * agentic mode, names no site, or names a site and kind the registry has no
+ * entry for - and a fallback still might. Every reason is a sentence a
+ * person can act on, and none of them has opened a browser.
+ */
+export function choosePlaybook(registry: PlaybookRegistry, task: Task): PlaybookChoice {
+  if (task.mode !== 'playbook') {
+    return { kind: 'unmatched', reason: 'the task asks for agentic mode' };
+  }
+  if (!isRecord(task.input)) return { kind: 'refused', reason: 'the task input is not an object' };
+  const site = task.input['site'];
+  if (typeof site !== 'string' || site.trim() === '') {
+    return { kind: 'unmatched', reason: 'the task input names no site' };
+  }
+  const playbook = registry.lookup(site, task.kind);
+  if (playbook === undefined) {
+    return { kind: 'unmatched', reason: `no playbook for ${task.kind} on ${site}` };
+  }
+  return { kind: 'chosen', playbook, input: task.input };
+}
+
+/** The latest accepted reply to exactly this question. */
+export function answerTo(answers: readonly TaskAnswer[], question: string): string | undefined {
+  for (let index = answers.length - 1; index >= 0; index -= 1) {
+    const answer = answers[index];
+    if (answer !== undefined && answer.question === question) return answer.reply;
+  }
+  return undefined;
+}
+
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function settle(step: PlaybookStep, page: Page, context: PlaybookContext): Promise<StepOutcome> {
+  try {
+    return await step.run(page, context);
+  } catch (error: unknown) {
+    return { kind: 'failed', reason: describe(error) };
+  }
+}
+
+function trailDetail(outcome: StepOutcome): unknown {
+  switch (outcome.kind) {
+    case 'done':
+      return outcome.detail;
+    case 'ask':
+      return { question: outcome.question };
+    case 'failed':
+    case 'refused':
+      return outcome.detail === undefined
+        ? { reason: outcome.reason }
+        : { reason: outcome.reason, detail: outcome.detail };
+  }
+}
+
+/**
+ * The steps, in order, on one page. Each step's outcome goes on the trail
+ * before the next step starts, so a trail read mid-run says where the run
+ * is. A guard stop wins over whatever the step was doing and over the trail:
+ * once the guard has stopped, nothing more is written here, because the
+ * session is being released under the step and the stop is the mission's
+ * outcome, not the step's.
+ *
+ * The result of a run that reaches the end is the playbook, the completed
+ * steps, and whatever the steps handed back for it, folded in under the
+ * runner's own two fields so a step cannot rename the playbook.
+ */
+export async function runSteps(
+  playbook: Playbook,
+  page: Page,
+  context: PlaybookContext,
+  guard: Pick<Guardrails, 'stop'>,
+  log: (payload: StepEventPayload) => Promise<void>,
+): Promise<MissionOutcome> {
+  const completed: { readonly name: string; readonly detail?: unknown }[] = [];
+  let handedBack: Record<string, unknown> = {};
+  for (const step of playbook.steps) {
+    if (guard.stop !== undefined) return stopOutcome(guard.stop);
+    const outcome = await settle(step, page, context);
+    if (guard.stop !== undefined) return stopOutcome(guard.stop);
+    const detail = trailDetail(outcome);
+    await log(
+      detail === undefined
+        ? { name: step.name, outcome: outcome.kind }
+        : { name: step.name, outcome: outcome.kind, detail },
+    );
+    switch (outcome.kind) {
+      case 'done':
+        completed.push(
+          outcome.detail === undefined
+            ? { name: step.name }
+            : { name: step.name, detail: outcome.detail },
+        );
+        if (outcome.result !== undefined) handedBack = { ...handedBack, ...outcome.result };
+        break;
+      case 'ask':
+        return { kind: 'ask', question: outcome.question };
+      case 'failed':
+        if (outcome.reconnect === true) await context.expireConnection?.();
+        return outcome.detail === undefined
+          ? { kind: 'failed', reason: `${step.name}: ${outcome.reason}` }
+          : { kind: 'failed', reason: `${step.name}: ${outcome.reason}`, detail: outcome.detail };
+      case 'refused':
+        return outcome.detail === undefined
+          ? { kind: 'failed', cause: 'refused', reason: `${step.name}: ${outcome.reason}` }
+          : { kind: 'failed', cause: 'refused', reason: `${step.name}: ${outcome.reason}`, detail: outcome.detail };
+    }
+  }
+  return { kind: 'succeeded', result: { ...handedBack, playbook: playbook.id, steps: completed } };
+}
+
+function refusal(reason: string): MissionOutcome {
+  return { kind: 'failed', reason };
+}
+
+/** How a run gets onto the site: signed in with what the connection yields, or as anyone, or not at all. */
+type Access =
+  | { readonly kind: 'signed-in'; readonly connection: SiteConnection; readonly credential: SiteCredential }
+  | { readonly kind: 'open' }
+  | { readonly kind: 'refused'; readonly reason: string }
+  /** Nothing is wrong with the task; the registry just has nothing for it. A fallback may. */
+  | { readonly kind: 'unmatched'; readonly reason: string };
+
+/** The connection and credential a `connection` playbook signs in with, or why it cannot. */
+async function signIn(
+  options: PlaybookRunnerOptions,
+  credentials: CredentialSource,
+  task: Task,
+  playbook: Playbook,
+): Promise<Access> {
+  const connection = await readSiteConnection(options.db, task.userId, playbook.siteDomain);
+  if (connection === undefined) return { kind: 'refused', reason: `no site connection for ${playbook.siteDomain}` };
+  if (connection.status !== 'connected') {
+    return { kind: 'refused', reason: `the site connection for ${playbook.siteDomain} is ${connection.status}` };
+  }
+  const credential = await credentials(connection, task);
+  if (credential === undefined) return { kind: 'refused', reason: `no credential for ${playbook.siteDomain}` };
+  return { kind: 'signed-in', connection, credential };
+}
+
+/** What a step that finds its session dead may call: the row flips to `expired`. */
+function expirer(db: TaskDatabase, connectionId: string): () => Promise<void> {
+  return async () => {
+    await expireSiteConnection(db, connectionId);
+  };
+}
+
+/** What an unmatched task fails with when nothing else will run it. */
+function runnerless(task: Task, reason: string): string {
+  return task.mode === 'agentic' ? 'agentic mode has no runner yet' : reason;
+}
+
+/**
+ * The mission a worker registers the task engine with. A task no playbook
+ * matches goes to the fallback, with the trail saying why the playbooks
+ * passed on it; without a fallback it fails there.
+ */
+export function createPlaybookMission(options: PlaybookRunnerOptions): Mission {
+  const credentials = options.credentials ?? profileCredentials;
+  return async (mission) => {
+    const { task, answers, step } = mission;
+    const choice = choosePlaybook(options.registry, task);
+    if (choice.kind === 'refused') return refusal(choice.reason);
+    if (choice.kind === 'unmatched') {
+      if (options.fallback === undefined) return refusal(runnerless(task, choice.reason));
+      await step({ name: 'playbook', outcome: 'unmatched', detail: { reason: choice.reason } });
+      return options.fallback(mission);
+    }
+    const { playbook } = choice;
+    await recordPlaybook(options.db, task.id, playbook.id);
+    const access: Access =
+      playbook.access === 'open' ? { kind: 'open' } : await signIn(options, credentials, task, playbook);
+    if (access.kind === 'refused') return refusal(access.reason);
+    const context: PlaybookContext = {
+      task,
+      input: choice.input,
+      ...(access.kind === 'signed-in'
+        ? {
+            connection: access.connection,
+            credential: access.credential,
+            expireConnection: expirer(options.db, access.connection.id),
+          }
+        : {}),
+      answers,
+      answerTo: (question) => answerTo(answers, question),
+    };
+    const request: BrowserRequest =
+      access.kind === 'signed-in' && access.credential.kind === 'profile'
+        ? { ...options.request, profileId: access.credential.profileId }
+        : { ...options.request };
+    const run = await guardedSession(
+      {
+        provider: options.provider,
+        policy: { allowlist: playbook.allowlist, confirmedPayments: paymentConfirmations(answers) },
+        request,
+      },
+      async (page, session, guard) => {
+        await recordBrowserSession(options.db, task.id, session);
+        return runSteps(playbook, page, context, guard, step);
+      },
+    );
+    return run.outcome.kind === 'stopped' ? stopOutcome(run.outcome.stop) : run.outcome.value;
+  };
+}

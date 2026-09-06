@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createApp } from './app.js';
-import type { ErrorEnvelope } from './errors.js';
+import { HttpError, type ErrorEnvelope } from './errors.js';
 
 const ENVIRONMENT: NodeJS.ProcessEnv = {
   DATABASE_URL: 'postgres://user@localhost:5432/chief_of_staff',
@@ -23,6 +23,14 @@ afterEach(async () => {
   vi.unstubAllEnvs();
 });
 
+/**
+ * Booting a real Fastify instance - every plugin registered, every route
+ * schema compiled by Ajv - is the cost this file exists to pay, and under
+ * `pnpm check` it is paid while the coverage-instrumented suite and three Next
+ * dev servers compile around it. Measured at 7.7s against the 5s default. The
+ * budget belongs to the suite rather than to one test: the first test does not
+ * absorb the boot on behalf of the rest, because each test boots its own app.
+ */
 describe('the api app factory', () => {
   it('boots with the configuration it read from the environment', async () => {
     const instance = app();
@@ -123,6 +131,26 @@ describe('the api app factory', () => {
     expect(response.json()).toEqual({ conflict: true });
   });
 
+  it('carries the per-field details a handler attached to its own refusal', async () => {
+    const instance = app();
+    instance.get('/probe', () => {
+      throw new HttpError(400, 'validation_failed', 'The probe did not mean anything.', [
+        { path: '/schedule', message: 'runs every 1 minute; the floor is every 5 minutes' },
+      ]);
+    });
+
+    const response = await instance.inject({ method: 'GET', url: '/probe' });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json<ErrorEnvelope>()).toEqual({
+      error: {
+        code: 'validation_failed',
+        message: 'The probe did not mean anything.',
+        details: [{ path: '/schedule', message: 'runs every 1 minute; the floor is every 5 minutes' }],
+      },
+    });
+  });
+
   it('maps an unmapped 4xx a route threw to the generic bad_request code', async () => {
     const instance = app();
     instance.get('/probe', () => {
@@ -151,4 +179,4 @@ describe('the api app factory', () => {
     });
     expect(response.body).not.toContain('hunter2');
   });
-});
+}, 60_000);

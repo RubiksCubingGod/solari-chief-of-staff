@@ -15,5 +15,11 @@
   ],
   "scripts": {
     "build": "tsc --build"
+  },
+  "dependencies": {
+    "@chief-of-staff/core": "workspace:*",
+    "@chief-of-staff/db": "workspace:*",
+    "drizzle-orm": "0.45.2",
+    "grammy": "1.46.0"
   }
 }

@@ -11,6 +11,7 @@ import { parse } from 'yaml';
  */
 
 interface Step {
+  readonly if?: string;
   readonly uses?: string;
   readonly run?: string;
   readonly with?: Record<string, unknown>;
@@ -159,11 +160,82 @@ describe('.github/workflows/live-smoke.yml', () => {
   });
 });
 
+const liveOps = parse(read('../.github/workflows/live-ops.yml')) as Workflow;
+const liveOpsJob = liveOps.jobs?.['live-ops'];
+const liveOpsSteps = liveOpsJob?.steps ?? [];
+const liveOpsRuns = liveOpsSteps.flatMap((step) => (step.run === undefined ? [] : [step.run]));
+const liveOpsScript = read('../scripts/live-ops.mjs');
+
+describe('.github/workflows/live-ops.yml', () => {
+  it('fires only on a schedule or a manual dispatch, never on push or pull request', () => {
+    expect(Object.keys(liveOps.on ?? {}).sort()).toEqual(['schedule', 'workflow_dispatch']);
+  });
+
+  it("carries a cron entry of its own, off the other nightlies' minutes", () => {
+    // Three nightlies on one minute would share a runner's worst hour, and a
+    // night that ran while the smoke held a session would count it twice.
+    const cronOf = (workflow: Workflow): string | undefined =>
+      ((workflow.on ?? {})['schedule'] as { cron?: string }[] | undefined)?.[0]?.cron;
+    const cron = cronOf(liveOps);
+    expect(cron).toMatch(/^\S+ \S+ \S+ \S+ \S+$/u);
+    expect(cron).not.toBe(cronOf(liveSmoke));
+    expect(cron).not.toBe(cronOf(parse(read('../.github/workflows/live-evals.yml')) as Workflow));
+  });
+
+  it('skips, never passes, when either key is missing', () => {
+    expect(liveOpsJob?.needs).toBe('guard');
+    expect(liveOpsJob?.if).toContain("needs.guard.outputs.configured == 'true'");
+    const guard = liveOps.jobs?.['guard'];
+    expect(guard?.outputs?.['configured']).toContain('steps.key.outputs');
+    const key = guard?.steps?.find((step) => step.run?.includes('configured=true') === true);
+    expect(key?.run).toContain('SOLARI_API_KEY');
+    expect(key?.run).toContain('ANTHROPIC_API_KEY');
+  });
+
+  it('queues an overlapping night rather than cancelling one mid-measurement', () => {
+    expect(liveOps.concurrency?.group).toBe('live-ops');
+    expect(liveOps.concurrency?.['cancel-in-progress']).toBe(false);
+  });
+
+  it('runs the one entry point, hands it both keys, and holds it to a cost target', () => {
+    expect(liveOpsRuns).toContain('node scripts/live-ops.mjs');
+    expect(manifest.scripts['live-ops']).toBe('node scripts/live-ops.mjs');
+    expect(liveOpsJob?.env?.['SOLARI_API_KEY']).toContain('secrets.SOLARI_API_KEY');
+    expect(liveOpsJob?.env?.['ANTHROPIC_API_KEY']).toContain('secrets.ANTHROPIC_API_KEY');
+    expect(liveOpsJob?.env?.['LIVE_OPS_COST_TARGET_USD']).toBeDefined();
+    expect(liveOpsScript).toContain('LIVE_OPS_COST_TARGET_USD');
+  });
+
+  it('runs one case per class the release counts, each reported apart', () => {
+    for (const kind of ['session', 'watch', 'mission', 'eval']) {
+      expect(liveOpsScript).toContain(`class: '${kind}'`);
+    }
+    // The three words a night's cases can end in, each its own annotation in
+    // the run: the report must never fold an outage into a regression.
+    expect(liveOpsScript).toMatch(/passed: 'notice', failed: 'error', errored: 'warning'/u);
+  });
+
+  it('uploads the night and its record whatever the verdict, for a person to copy', () => {
+    const upload = liveOpsSteps.find((step) => step.uses?.startsWith('actions/upload-artifact@') === true);
+    expect(upload?.if).toBe('always()');
+    expect(String(upload?.with?.['path'])).toBe('live-ops/');
+    expect(liveOpsJob?.env?.['LIVE_OPS_REPORT_DIR']).toBe('live-ops');
+  });
+
+  it('installs from the lockfile and the browser, before the night', () => {
+    expect(liveOpsRuns).toContain('pnpm install --frozen-lockfile');
+    const browsers = liveOpsRuns.findIndex((run) => run.startsWith('pnpm browsers'));
+    expect(browsers).toBeGreaterThanOrEqual(0);
+    expect(liveOpsRuns.indexOf('node scripts/live-ops.mjs')).toBeGreaterThan(browsers);
+  });
+});
+
 describe('the ordinary gate stays offline', () => {
   it('never puts the Solari key anywhere near the push-triggered check', () => {
     // `check.yml` runs on every push. If the key ever reaches it, the live
     // suite's opt-in guard becomes the only thing standing between a commit and
     // a bill - and guards get edited.
     expect(read('../.github/workflows/check.yml')).not.toContain('SOLARI_API_KEY');
+    expect(read('../.github/workflows/check.yml')).not.toContain('ANTHROPIC_API_KEY');
   });
 });
